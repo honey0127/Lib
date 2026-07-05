@@ -1,0 +1,70 @@
+package com.example.rag_library
+
+import java.io.Closeable
+
+/**
+ * C++ 벡터 인덱스(librag-core.so)의 얇은 JNI 래퍼.
+ *
+ * - 스레드 안전하지 않다. 동기화는 상위 레이어([RagEngine])가 담당한다.
+ * - 네이티브 힙 메모리를 쥐고 있으므로 사용 후 반드시 [close] (또는 `use {}`) 할 것.
+ */
+internal class NativeVectorIndex(val dim: Int) : Closeable {
+
+    internal data class Hit(val id: Int, val score: Float)
+
+    private var handle: Long
+
+    init {
+        require(dim > 0) { "dim must be > 0" }
+        handle = nativeCreate(dim)
+    }
+
+    fun add(id: Int, vector: FloatArray) {
+        require(vector.size == dim) { "vector.size(${vector.size}) != dim($dim)" }
+        nativeAdd(checkOpen(), id, vector)
+    }
+
+    /** 코사인 유사도 상위 k개를 점수 내림차순으로 반환한다(인덱스가 k보다 작으면 그만큼만). */
+    fun search(query: FloatArray, k: Int): List<Hit> {
+        require(query.size == dim) { "query.size(${query.size}) != dim($dim)" }
+        require(k > 0) { "k must be > 0" }
+        val ids = IntArray(k)
+        val scores = FloatArray(k)
+        val n = nativeSearch(checkOpen(), query, k, ids, scores)
+        return List(n) { Hit(ids[it], scores[it]) }
+    }
+
+    fun size(): Int = nativeSize(checkOpen())
+
+    override fun close() {
+        if (handle != 0L) {
+            nativeDestroy(handle)
+            handle = 0L
+        }
+    }
+
+    private fun checkOpen(): Long {
+        check(handle != 0L) { "NativeVectorIndex is closed" }
+        return handle
+    }
+
+    companion object {
+        init {
+            System.loadLibrary("rag-core")
+        }
+
+        // 대응 C++ 심볼: Java_com_example_rag_1library_NativeVectorIndex_<이름>
+        // @JvmStatic 이므로 네이티브 시그니처는 (JNIEnv*, jclass, ...) — CLAUDE.md JNI 규칙 참고
+        @JvmStatic private external fun nativeCreate(dim: Int): Long
+        @JvmStatic private external fun nativeDestroy(handle: Long)
+        @JvmStatic private external fun nativeAdd(handle: Long, id: Int, vector: FloatArray)
+        @JvmStatic private external fun nativeSize(handle: Long): Int
+        @JvmStatic private external fun nativeSearch(
+            handle: Long,
+            query: FloatArray,
+            k: Int,
+            outIds: IntArray,
+            outScores: FloatArray,
+        ): Int
+    }
+}

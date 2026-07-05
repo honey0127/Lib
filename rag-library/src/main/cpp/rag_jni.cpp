@@ -1,0 +1,131 @@
+#include <jni.h>
+
+#include <cstring>
+#include <vector>
+
+#include "vector_index.h"
+
+// com.example.rag_library.NativeVectorIndex 의 @JvmStatic external 함수 구현.
+// 심볼 규칙: 패키지명 rag_library 안의 '_' 는 '_1' 로 이스케이프된다.
+//   → Java_com_example_rag_1library_NativeVectorIndex_<메서드>
+// @JvmStatic(정적)이므로 두 번째 인자는 jclass. (CLAUDE.md JNI 규칙 참고)
+
+namespace {
+
+rag::VectorIndex* fromHandle(jlong handle) {
+    return reinterpret_cast<rag::VectorIndex*>(handle);
+}
+
+void throwIllegalArgument(JNIEnv* env, const char* msg) {
+    if (jclass cls = env->FindClass("java/lang/IllegalArgumentException")) {
+        env->ThrowNew(cls, msg);
+    }
+}
+
+void throwIllegalState(JNIEnv* env, const char* msg) {
+    if (jclass cls = env->FindClass("java/lang/IllegalStateException")) {
+        env->ThrowNew(cls, msg);
+    }
+}
+
+// FloatArray → C++ 버퍼 복사. GetPrimitiveArrayCritical 은 (대부분) 복사 없이 배열을
+// 잠깐 고정(pin)하므로, Critical 구간 안에서는 JNI 호출·할당·블로킹 없이 memcpy 만
+// 하고 즉시 해제한다. dst 는 호출 전에 미리 할당해 둘 것.
+bool copyFloatArray(JNIEnv* env, jfloatArray src, std::vector<float>& dst) {
+    void* p = env->GetPrimitiveArrayCritical(src, nullptr);
+    if (p == nullptr) {
+        return false;  // OOM 등 — JVM 예외가 이미 걸려 있다
+    }
+    std::memcpy(dst.data(), p, dst.size() * sizeof(float));
+    env->ReleasePrimitiveArrayCritical(src, p, JNI_ABORT);  // 읽기 전용 → write-back 생략
+    return true;
+}
+
+}  // namespace
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_example_rag_1library_NativeVectorIndex_nativeCreate(JNIEnv* env, jclass, jint dim) {
+    if (dim <= 0) {
+        throwIllegalArgument(env, "dim must be > 0");
+        return 0;
+    }
+    return reinterpret_cast<jlong>(new rag::VectorIndex(dim));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_example_rag_1library_NativeVectorIndex_nativeDestroy(JNIEnv*, jclass, jlong handle) {
+    delete fromHandle(handle);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_example_rag_1library_NativeVectorIndex_nativeAdd(
+        JNIEnv* env, jclass, jlong handle, jint id, jfloatArray vector) {
+    rag::VectorIndex* idx = fromHandle(handle);
+    if (idx == nullptr) {
+        throwIllegalState(env, "index handle is closed");
+        return;
+    }
+    if (env->GetArrayLength(vector) != idx->dim()) {
+        throwIllegalArgument(env, "vector length != dim");
+        return;
+    }
+    std::vector<float> tmp(static_cast<size_t>(idx->dim()));
+    if (!copyFloatArray(env, vector, tmp)) {
+        return;
+    }
+    idx->add(id, tmp.data());
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_example_rag_1library_NativeVectorIndex_nativeSize(JNIEnv* env, jclass, jlong handle) {
+    rag::VectorIndex* idx = fromHandle(handle);
+    if (idx == nullptr) {
+        throwIllegalState(env, "index handle is closed");
+        return 0;
+    }
+    return static_cast<jint>(idx->size());
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_example_rag_1library_NativeVectorIndex_nativeSearch(
+        JNIEnv* env, jclass, jlong handle, jfloatArray query, jint k,
+        jintArray outIds, jfloatArray outScores) {
+    rag::VectorIndex* idx = fromHandle(handle);
+    if (idx == nullptr) {
+        throwIllegalState(env, "index handle is closed");
+        return 0;
+    }
+    if (env->GetArrayLength(query) != idx->dim()) {
+        throwIllegalArgument(env, "query length != dim");
+        return 0;
+    }
+    if (k <= 0) {
+        throwIllegalArgument(env, "k must be > 0");
+        return 0;
+    }
+    if (env->GetArrayLength(outIds) < k || env->GetArrayLength(outScores) < k) {
+        throwIllegalArgument(env, "out arrays must hold at least k elements");
+        return 0;
+    }
+
+    std::vector<float> q(static_cast<size_t>(idx->dim()));
+    if (!copyFloatArray(env, query, q)) {
+        return 0;
+    }
+
+    const std::vector<rag::SearchHit> hits = idx->topK(q.data(), k);
+    const jint n = static_cast<jint>(hits.size());
+    if (n == 0) {
+        return 0;
+    }
+
+    std::vector<jint> ids(static_cast<size_t>(n));
+    std::vector<jfloat> scores(static_cast<size_t>(n));
+    for (jint i = 0; i < n; ++i) {
+        ids[static_cast<size_t>(i)] = hits[static_cast<size_t>(i)].id;
+        scores[static_cast<size_t>(i)] = hits[static_cast<size_t>(i)].score;
+    }
+    env->SetIntArrayRegion(outIds, 0, n, ids.data());
+    env->SetFloatArrayRegion(outScores, 0, n, scores.data());
+    return n;
+}

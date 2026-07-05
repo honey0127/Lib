@@ -7,10 +7,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 네이티브 라이브러리 정의 및 소스 파일 등록
+# (tests/ 하위는 호스트 전용 테스트라 타깃에 넣지 않는다)
 add_library(
         rag-core
         SHARED
         native-lib.cpp
+        rag_jni.cpp
+        vector_index.cpp
 )
 
 # 안드로이드 로그 라이브러리 등 링크
