@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main, honey]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: C++ 호스트 테스트 + 유닛테스트 + AAR
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      # ⓪ C++ 코어 로직 테스트 — Android 없이 수 초 만에 실패를 잡는 1차 관문
+      - name: C++ vector_index 호스트 테스트
+        run: |
+          g++ -std=c++17 -O2 \
+            rag-library/src/main/cpp/vector_index.cpp \
+            rag-library/src/main/cpp/tests/vector_index_test.cpp \
+            -o /tmp/vector_index_test
+          /tmp/vector_index_test
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      # ①+② 유닛테스트(호스트 JVM) + 네이티브 포함 AAR 빌드
+      - name: 유닛테스트 + AAR 빌드
+        run: ./gradlew :rag-library:testDebugUnitTest :rag-library:assembleRelease
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: unit-test-reports
+          path: rag-library/build/reports
+
+  instrumented:
+    name: JNI 왕복 계측 테스트 (에뮬레이터)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: KVM 활성화 (에뮬레이터 가속)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      # ③ 실제 Android 런타임에서 System.loadLibrary + JNI 왕복 검증 (핵심 게이트)
+      - name: connectedDebugAndroidTest
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: default
+          disable-animations: true
+          script: ./gradlew :rag-library:connectedDebugAndroidTest
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: instrumented-test-reports
+          path: rag-library/build/reports
