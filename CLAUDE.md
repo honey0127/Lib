@@ -6,6 +6,8 @@ Android 앱에 **완전 오프라인** AI 문서 검색을 넣는 오픈소스 K
 이 문서는 Claude Code / 개발자를 위한 **빌드·검증 명령 및 JNI 규칙의 단일 진실 소스**다.
 반복 빌드-수정 루프에서 먼저 참조한다.
 
+**작업 브랜치: `honey`** (사용자 지시 — 직접 이 브랜치에 커밋·푸시한다.)
+
 ## 모듈 구조
 - `:rag-library` — 라이브러리 본체(AAR). Kotlin API + `src/main/cpp` 의 C++/JNI 코어(`librag-core.so`). **개발의 중심.**
 - `:app` — 데모/수동 테스트용 앱 셸(namespace `com.example.lib`). 현재 UI 없음(res+manifest만). 데모 UI는 Phase 4에서 채운다.
@@ -14,12 +16,21 @@ Android 앱에 **완전 오프라인** AI 문서 검색을 넣는 오픈소스 K
 rag-library/src/main/
 ├── AndroidManifest.xml
 ├── cpp/
-│   ├── CMakeLists.txt        # add_library(rag-core SHARED native-lib.cpp)
-│   └── native-lib.cpp        # JNI 진입점
+│   ├── CMakeLists.txt         # add_library(rag-core SHARED native-lib.cpp rag_jni.cpp vector_index.cpp)
+│   ├── native-lib.cpp         # Phase 0 JNI 왕복 스모크(stringFromJNI)
+│   ├── vector_index.{h,cpp}   # 순수 C++ 브루트포스 코사인 top-k (JNI 무관 → 호스트 테스트 가능)
+│   ├── rag_jni.cpp            # NativeVectorIndex JNI 브리지 (핸들 기반 5개 함수)
+│   └── tests/vector_index_test.cpp  # 호스트(g++) 단독 실행 테스트 — CMake 타깃에 미포함
 └── java/com/example/rag_library/
-    └── OnDeviceRAGCore.kt     # loadLibrary("rag-core") + external fun stringFromJNI()
-rag-library/src/androidTest/java/com/example/rag_library/
-└── OnDeviceRAGCoreTest.kt     # JNI 왕복 검증(계측 테스트)
+    ├── OnDeviceRAGCore.kt     # loadLibrary("rag-core") + stringFromJNI() (스모크)
+    ├── NativeVectorIndex.kt   # C++ 인덱스 래퍼 (internal, Closeable, @JvmStatic external)
+    ├── Models.kt              # Chunk / SearchResult
+    ├── TextChunker.kt         # 문장 경계 + overlap 청킹
+    ├── Embedder.kt            # 임베딩 인터페이스 (ONNX e5 교체 지점)
+    ├── HashingEmbedder.kt     # 문자 n-gram 해싱 임베더 (무모델 Phase 0 기본)
+    └── RagEngine.kt           # 공개 파사드: addDocument / search
+rag-library/src/test/…         # 호스트 유닛테스트 (TextChunker, HashingEmbedder)
+rag-library/src/androidTest/…  # 계측: OnDeviceRAGCoreTest, NativeVectorIndexTest, RagEngineTest(E2E)
 ```
 
 ## 툴체인 (repo 실제 고정값)
@@ -30,54 +41,70 @@ rag-library/src/androidTest/java/com/example/rag_library/
 | Kotlin | 2.1.0 (잠정) | `gradle/libs.versions.toml` |
 | compileSdk | 36 (minorApiLevel 1) | 각 모듈 `build.gradle.kts` |
 | minSdk | 26 | |
-| Java | 11 | `compileOptions` / `kotlinOptions.jvmTarget` |
+| Java | 11 (`kotlin.compilerOptions.jvmTarget`) | 각 모듈 |
+| Gradle 데몬 JVM | 21 | `gradle/gradle-daemon-jvm.properties` |
 | CMake | 3.22.1 | |
 | NDK | SDK 기본값(미고정) | 재현성 위해 `ndkVersion` 고정 권장 |
 | C++ | 17 | `cppFlags` / `CMakeLists.txt` |
 | ABI | arm64-v8a, x86_64 | `rag-library` `defaultConfig.ndk.abiFilters` |
 
-> ⚠️ **Kotlin 버전 주의**: 2.1.0 으로 잠정 고정했다. Gradle이 AGP 9.2.1 과의 호환성 오류를 내면
-> Android Studio 가 번들한 Kotlin 버전에 맞춰 `libs.versions.toml` 의 `kotlin` 값을 조정할 것.
-> (에러 메시지에 요구 버전이 그대로 찍힌다 → 한 줄 수정으로 해결.)
+> ⚠️ **Kotlin 버전 주의**: 2.1.0 잠정 고정. AGP 9.2.1 과 호환성 오류가 나면 에러 메시지에 찍힌
+> 요구 버전으로 `libs.versions.toml` 의 `kotlin` 값을 한 줄 수정.
 
-## 빌드 & 검증 — Phase 0 순서
-사전 조건: Android SDK + NDK 설치, `local.properties` 의 `sdk.dir=` 또는 `ANDROID_HOME` 설정.
+## 빌드 & 검증 순서
+사전 조건(로컬): Android SDK + NDK, JDK 21, `local.properties` 또는 `ANDROID_HOME`.
 
 ```bash
+# ⓪ C++ 코어 로직만 초고속 검증 — Android/SDK 불필요, 어느 환경에서든 가능
+g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+  rag-library/src/main/cpp/vector_index.cpp \
+  rag-library/src/main/cpp/tests/vector_index_test.cpp \
+  -o /tmp/vector_index_test && /tmp/vector_index_test   # 기대 출력: ALL OK
+
 # ① C++17 컴파일 + CMake 링킹 확인 (librag-core.so 생성)
 ./gradlew :rag-library:externalNativeBuildDebug
 
-# ② AAR 산출 (라이브러리 전체 컴파일 — Kotlin 포함)
-./gradlew :rag-library:assembleRelease
+# ② 호스트 유닛테스트 + AAR 산출
+./gradlew :rag-library:testDebugUnitTest :rag-library:assembleRelease
 
-# ③ 실기기/에뮬레이터에서 JNI 왕복 검증 (핵심 게이트, 기기 연결 필요)
+# ③ 실기기/에뮬레이터 계측 테스트 — JNI 왕복 + 검색 E2E (핵심 게이트)
 ./gradlew :rag-library:connectedDebugAndroidTest
 ```
 
-③의 `OnDeviceRAGCoreTest.jniRoundTrip` 이 통과하면 Phase 0 위험 구간을 넘긴 것.
-
 > ⚠️ **유닛테스트로는 JNI 검증 불가.** `./gradlew test`(host JVM)는 `.so`를 로드하지 못한다.
-> `System.loadLibrary` 가 실제로 뜨는지는 반드시 ③(계측 테스트)로만 확인된다.
-> 에뮬레이터로 돌린다면 ABI에 `x86_64` 가 포함돼 있어야 한다(이미 포함).
+> `System.loadLibrary` 와 JNI 왕복은 반드시 ③(계측) 또는 CI instrumented 잡으로 확인한다.
+
+### CI (GitHub Actions, `.github/workflows/ci.yml`)
+`main`/`honey` push 및 PR마다 자동 실행:
+- **build 잡**: ⓪ C++ 호스트 테스트 → ② 유닛테스트 + AAR (ubuntu, JDK 21)
+- **instrumented 잡**: ③ 을 에뮬레이터(API 34, x86_64, KVM)에서 실행
+→ **SDK 없는 환경(클라우드 세션)에서도 push 후 Actions 탭에서 초록불 확인 가능.**
 
 ## JNI 규칙 — 새 네이티브 함수 추가 시 필독
-- **패키지/클래스**: Kotlin `com.example.rag_library`, 네이티브 클래스 `OnDeviceRAGCore`.
-- **심볼 이름**: `Java_<패키지경로(_구분)>_<클래스>_<메서드>`. 패키지명 안의 `_`는 **`_1`로 이스케이프**된다.
-  - `com.example.rag_library.OnDeviceRAGCore#foo` → `Java_com_example_rag_1library_OnDeviceRAGCore_foo`
-  - 한 글자라도 틀리면 런타임 `UnsatisfiedLinkError`. (함수 수가 늘면 `JNI_OnLoad` + `RegisterNatives` 패턴 검토.)
-- **라이브러리 이름 3중 일치**: `System.loadLibrary("rag-core")` ↔ CMake `add_library(rag-core ...)` ↔ 산출물 `librag-core.so`.
-- **시그니처**: `external fun` 파라미터 ↔ C++ 인자. 인스턴스 메서드면 `(JNIEnv*, jobject)`, `@JvmStatic`/companion 정적이면 `(JNIEnv*, jclass)`.
+- **패키지/클래스**: Kotlin `com.example.rag_library`. 네이티브 클래스: `OnDeviceRAGCore`(스모크), `NativeVectorIndex`(인덱스).
+- **심볼 이름**: `Java_<패키지경로(_구분)>_<클래스>_<메서드>`. 패키지명 안의 `_`는 **`_1`로 이스케이프**.
+  - 예: `NativeVectorIndex#nativeAdd` → `Java_com_example_rag_1library_NativeVectorIndex_nativeAdd`
+  - 한 글자라도 틀리면 런타임 `UnsatisfiedLinkError`. (함수가 더 늘면 `JNI_OnLoad` + `RegisterNatives` 검토.)
+- **정적/인스턴스**: `@JvmStatic`(companion) → `(JNIEnv*, jclass)`, 인스턴스 → `(JNIEnv*, jobject)`.
+  `NativeVectorIndex` 의 5개 함수는 전부 `@JvmStatic` + 핸들(jlong) 전달 방식.
+- **라이브러리 이름 3중 일치**: `System.loadLibrary("rag-core")` ↔ `add_library(rag-core ...)` ↔ `librag-core.so`.
+- **FloatArray 전달 패턴**(rag_jni.cpp 참고): `GetPrimitiveArrayCritical` → `memcpy` → 즉시 `Release(..., JNI_ABORT)`.
+  Critical 구간 안에서 JNI 호출·힙 할당·블로킹 금지. 출력은 `Set{Int,Float}ArrayRegion` 으로 out-배열에 기록.
+- **심볼 사전 검증(로컬/클라우드 공통)**: JDK 헤더로 컴파일 후 `nm` 확인 —
+  `g++ -std=c++17 -I$JAVA_HOME/include -I$JAVA_HOME/include/linux -fPIC -c rag_jni.cpp && nm -g rag_jni.o | grep Java_`
 
 ## 절대 커밋 금지
 - 모델 가중치: `*.onnx`, `*.gguf`, `*.task`, `*.tflite`, `/models/` — 재배포 라이선스 문제 + GitHub 100MB 제한. 앱 최초 실행 시 다운로드하는 설계.
 - `local.properties` (기기별 SDK 경로).
 
-## 로드맵 (요약)
-- **Phase 0 ← 현재**: JNI 왕복 초록불 + 얇은 뼈대. HNSW·mmap·배열 최적화는 아직 넣지 않는다.
-- **Phase 0 다음 슬라이스**: ONNX 임베딩 + Kotlin 브루트포스 코사인 top-k("검색"만, LLM 없음). `FloatArray`를 C++로 넘기기 시작할 때 `GetPrimitiveArrayCritical` / Direct `ByteBuffer` 최적화를 설계.
-- **Phase 1~3**: 벡터 인덱스(HNSW) · mmap 영속화 · LLM(GGUF) 통합.
+## 로드맵 & 현재 위치
+- **Phase 0 (진행 중)**: ✅ JNI 왕복 뼈대 ✅ C++ 코사인 top-k 인덱스 ✅ JNI 브리지(FloatArray)
+  ✅ 청킹/해싱 임베더/RagEngine 파이프라인 — **남은 것: 실기기/CI 에서 ③ 초록불 확인**
+- **Phase 0.5 ← 다음 슬라이스**: ONNX Runtime + multilingual-e5-small 임베딩 (`Embedder` 구현체 교체).
+  토크나이저(SentencePiece) 통합이 핵심 난관 — onnxruntime-extensions 또는 그래프 내장 토크나이저 검토.
+- **Phase 1~3**: HNSW(동일 VectorIndex 인터페이스로 교체) · mmap 영속화 · LLM(GGUF).
 - **Phase 4**: 데모 앱 UI (`:app`).
-- **라이선스 정비(심사 항목)**: 루트 `LICENSE`(Apache-2.0 예정) + `THIRD_PARTY_LICENSES.md`(모델/런타임 출처·라이선스). 아직 미생성.
+- ~~라이선스 정비~~ ✅ 완료: `LICENSE`(Apache-2.0) + `NOTICE` + `THIRD_PARTY_LICENSES.md` + `README.md`.
 
 ## 대회 일정 (2026, 핵심 마감)
 - 참가접수: ~**7.17(금) 18:00**, oss.kr 온라인 접수. (최우선)
@@ -85,5 +112,6 @@ rag-library/src/androidTest/java/com/example/rag_library/
 - 1차 서면평가 9.3 / 시상식 12.4. (오리엔테이션 7.23, 멘토링·2차 평가는 결선 확정 후 포털 재확인)
 
 ## 이 원격(클라우드) 세션 주의
-이 컨테이너에는 Android SDK/NDK가 없어 Gradle Android 빌드·계측 테스트를 **실행할 수 없다**.
-여기서는 소스/설정 수정과 정적 검토까지만 가능하며, 실제 빌드·초록불 확인은 SDK가 설치된 로컬(Android Studio / 데스크톱 Claude Code)에서 수행한다.
+이 컨테이너에는 Android SDK/NDK가 없어 Gradle Android 빌드·계측 테스트를 **직접 실행할 수 없다**.
+여기서 가능한 검증: ⓪ C++ 호스트 테스트(g++), JNI 심볼 nm 확인, jshell 로직 검증, 정적 검토.
+①~③ 초록불은 **push 후 GitHub Actions** 또는 SDK가 있는 로컬(Android Studio / 데스크톱 Claude Code)에서 확인한다.
