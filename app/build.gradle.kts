@@ -2,7 +2,9 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
+    // Kotlin 플러그인은 별도 적용하지 않는다: AGP 9+ built-in Kotlin support 가 기본 활성화
+    // (android.builtInKotlin=true, 기본값)되어 있어 org.jetbrains.kotlin.android 를 함께 적용하면
+    // "Cannot add extension with name 'kotlin'" 충돌이 난다. kotlin{} 블록은 그대로 사용 가능.
 }
 
 android {

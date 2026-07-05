@@ -38,7 +38,7 @@ rag-library/src/androidTest/…  # 계측: OnDeviceRAGCoreTest, NativeVectorInde
 |---|---|---|
 | AGP | 9.2.1 | `gradle/libs.versions.toml` |
 | Gradle | 9.4.1 | `gradle/wrapper/gradle-wrapper.properties` |
-| Kotlin | 2.1.0 (잠정) | `gradle/libs.versions.toml` |
+| Kotlin | AGP 9 built-in Kotlin (별도 플러그인 미적용, KGP 2.2.10+ 자동) | — |
 | compileSdk | 36 (minorApiLevel 1) | 각 모듈 `build.gradle.kts` |
 | minSdk | 26 | |
 | Java | 11 (`kotlin.compilerOptions.jvmTarget`) | 각 모듈 |
@@ -48,8 +48,11 @@ rag-library/src/androidTest/…  # 계측: OnDeviceRAGCoreTest, NativeVectorInde
 | C++ | 17 | `cppFlags` / `CMakeLists.txt` |
 | ABI | arm64-v8a, x86_64 | `rag-library` `defaultConfig.ndk.abiFilters` |
 
-> ⚠️ **Kotlin 버전 주의**: 2.1.0 잠정 고정. AGP 9.2.1 과 호환성 오류가 나면 에러 메시지에 찍힌
-> 요구 버전으로 `libs.versions.toml` 의 `kotlin` 값을 한 줄 수정.
+> ⚠️ **Kotlin 플러그인을 별도로 적용하지 말 것**: AGP 9.0+ 는 built-in Kotlin support 가 기본
+> 활성화(`android.builtInKotlin=true`)돼 있어 `org.jetbrains.kotlin.android`(`kotlin-android`)를
+> `plugins {}` 에 같이 넣으면 `Cannot add extension with name 'kotlin'` 로 빌드가 깨진다.
+> `kotlin { compilerOptions { ... } }` 블록은 built-in Kotlin이 자동 생성하는 extension이라
+> 플러그인 없이도 그대로 쓸 수 있다. (AGP 10.0 에서는 opt-out인 `android.builtInKotlin=false` 자체가 사라짐.)
 
 ## 빌드 & 검증 순서
 사전 조건(로컬): Android SDK + NDK, JDK 21, `local.properties` 또는 `ANDROID_HOME`.
