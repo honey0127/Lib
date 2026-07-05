@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.android)
 }
 
 android {
@@ -22,11 +23,20 @@ android {
                 cppFlags += "-std=c++17"
             }
         }
+
+        // 빌드할 ABI 제한: 실기기(arm64-v8a) + 에뮬레이터(x86_64). AAR 크기도 축소됨.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    kotlinOptions {
+        jvmTarget = "11"
     }
 
     // ⭐ 추가 2: CMakeLists.txt 파일 위치와 버전을 Gradle에 알려줌

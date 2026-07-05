@@ -13,3 +13,11 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# 모델 가중치는 절대 커밋 금지 (재배포 라이선스 + GitHub 100MB 제한)
+# 앱 최초 실행 시 출처에서 다운로드하는 설계
+*.onnx
+*.gguf
+*.task
+*.tflite
+/models/
