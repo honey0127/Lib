@@ -30,6 +30,13 @@ jobs:
             rag-library/src/main/cpp/tests/hnsw_index_test.cpp \
             -o /tmp/hnsw_index_test
           /tmp/hnsw_index_test
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            rag-library/src/main/cpp/vector_index.cpp \
+            rag-library/src/main/cpp/hnsw_index.cpp \
+            rag-library/src/main/cpp/index_io.cpp \
+            rag-library/src/main/cpp/tests/index_io_test.cpp \
+            -o /tmp/index_io_test
+          /tmp/index_io_test
 
       - uses: actions/setup-java@v4
         with:

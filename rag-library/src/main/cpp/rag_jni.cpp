@@ -1,9 +1,12 @@
 #include <jni.h>
 
 #include <cstring>
+#include <memory>
+#include <string>
 #include <vector>
 
 #include "hnsw_index.h"
+#include "index_io.h"
 #include "vector_index.h"
 
 // com.example.rag_library.NativeVectorIndex 의 @JvmStatic external 함수 구현.
@@ -27,6 +30,23 @@ void throwIllegalState(JNIEnv* env, const char* msg) {
     if (jclass cls = env->FindClass("java/lang/IllegalStateException")) {
         env->ThrowNew(cls, msg);
     }
+}
+
+void throwIoException(JNIEnv* env, const char* msg) {
+    if (jclass cls = env->FindClass("java/io/IOException")) {
+        env->ThrowNew(cls, msg);
+    }
+}
+
+// jstring → std::string (Modified UTF-8; 파일 경로 용도로 충분)
+bool copyPath(JNIEnv* env, jstring path, std::string& out) {
+    const char* p = env->GetStringUTFChars(path, nullptr);
+    if (p == nullptr) {
+        return false;  // OOM — 예외 pending
+    }
+    out.assign(p);
+    env->ReleaseStringUTFChars(path, p);
+    return true;
 }
 
 // FloatArray → C++ 버퍼 복사. GetPrimitiveArrayCritical 은 (대부분) 복사 없이 배열을
@@ -89,6 +109,47 @@ Java_com_example_rag_1library_NativeVectorIndex_nativeAdd(
         return;
     }
     idx->add(id, tmp.data());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_example_rag_1library_NativeVectorIndex_nativeSave(
+        JNIEnv* env, jclass, jlong handle, jstring path) {
+    rag::VectorIndex* idx = fromHandle(handle);
+    if (idx == nullptr) {
+        throwIllegalState(env, "index handle is closed");
+        return;
+    }
+    std::string p;
+    if (!copyPath(env, path, p)) {
+        return;
+    }
+    if (!rag::saveIndex(*idx, p.c_str())) {
+        throwIoException(env, "failed to save index file");
+    }
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_example_rag_1library_NativeVectorIndex_nativeLoad(JNIEnv* env, jclass, jstring path) {
+    std::string p;
+    if (!copyPath(env, path, p)) {
+        return 0;
+    }
+    std::unique_ptr<rag::VectorIndex> idx = rag::loadIndex(p.c_str());
+    if (!idx) {
+        throwIoException(env, "failed to load index file (missing or corrupt)");
+        return 0;
+    }
+    return reinterpret_cast<jlong>(idx.release());
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_example_rag_1library_NativeVectorIndex_nativeDim(JNIEnv* env, jclass, jlong handle) {
+    rag::VectorIndex* idx = fromHandle(handle);
+    if (idx == nullptr) {
+        throwIllegalState(env, "index handle is closed");
+        return 0;
+    }
+    return idx->dim();
 }
 
 extern "C" JNIEXPORT jint JNICALL

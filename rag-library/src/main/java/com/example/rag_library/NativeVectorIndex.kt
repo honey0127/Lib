@@ -1,6 +1,8 @@
 package com.example.rag_library
 
 import java.io.Closeable
+import java.io.File
+import java.io.IOException
 
 /**
  * C++ 벡터 인덱스(librag-core.so)의 얇은 JNI 래퍼.
@@ -35,6 +37,11 @@ internal class NativeVectorIndex private constructor(
     }
 
     fun size(): Int = nativeSize(checkOpen())
+
+    /** 인덱스를 [file]에 저장한다(백엔드·그래프 포함). 실패 시 [IOException]. */
+    fun save(file: File) {
+        nativeSave(checkOpen(), file.absolutePath)
+    }
 
     override fun close() {
         if (handle != 0L) {
@@ -77,6 +84,15 @@ internal class NativeVectorIndex private constructor(
             return NativeVectorIndex(dim, nativeCreateHnsw(dim, m, efConstruction, efSearch))
         }
 
+        /**
+         * [save]로 저장한 인덱스를 복원한다. 파일 헤더의 kind 에 따라
+         * 브루트포스/HNSW 백엔드가 자동 선택된다. 손상·비정상 파일이면 [IOException].
+         */
+        fun load(file: File): NativeVectorIndex {
+            val handle = nativeLoad(file.absolutePath)
+            return NativeVectorIndex(nativeDim(handle), handle)
+        }
+
         // 대응 C++ 심볼: Java_com_example_rag_1library_NativeVectorIndex_<이름>
         // @JvmStatic 이므로 네이티브 시그니처는 (JNIEnv*, jclass, ...) — CLAUDE.md JNI 규칙 참고
         @JvmStatic private external fun nativeCreate(dim: Int): Long
@@ -87,6 +103,9 @@ internal class NativeVectorIndex private constructor(
             efSearch: Int,
         ): Long
         @JvmStatic private external fun nativeDestroy(handle: Long)
+        @JvmStatic private external fun nativeSave(handle: Long, path: String)
+        @JvmStatic private external fun nativeLoad(path: String): Long
+        @JvmStatic private external fun nativeDim(handle: Long): Int
         @JvmStatic private external fun nativeAdd(handle: Long, id: Int, vector: FloatArray)
         @JvmStatic private external fun nativeSize(handle: Long): Int
         @JvmStatic private external fun nativeSearch(

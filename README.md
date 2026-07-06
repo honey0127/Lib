@@ -43,6 +43,10 @@ RagEngine().use { rag ->
 // 2) 시맨틱 검색 (scripts/prepare_model.py 로 모델 준비 후)
 val embedder = OnnxEmbedder.create("/path/model.onnx", "/path/vocab.tsv")
 RagEngine(embedder, indexKind = IndexKind.HNSW).use { rag -> /* ... */ }
+
+// 3) 스냅샷 — 재시작 시 재인덱싱 없이 즉시 복원
+rag.save(File(dir, "snapshot"))                  // snapshot.idx + snapshot.meta
+val restored = RagEngine.load(File(dir, "snapshot"))
 ```
 
 ## 빌드 & 검증
@@ -72,8 +76,8 @@ g++ -std=c++17 -O2 rag-library/src/main/cpp/vector_index.cpp \
 |---|---|---|
 | Phase 0 | JNI 뼈대 + C++ 코사인 top-k + 청킹/검색 파이프라인 | ✅ |
 | Phase 0.5 | ONNX Runtime + e5 임베딩 + 순수 Kotlin SentencePiece 토크나이저 | ✅ 코드 완료 (실기기 검증 대기) |
-| Phase 1 | C++ HNSW 벡터 인덱스 (`IndexKind.HNSW`) | ✅ 코드 완료 (호스트 recall 1.0) |
-| Phase 2 | mmap 기반 인덱스 영속화 | ⏳ |
+| Phase 1 | C++ HNSW 벡터 인덱스 (`IndexKind.HNSW`) | ✅ (CI 계측 통과, recall 1.0) |
+| Phase 2 | 인덱스 영속화 — `RagEngine.save()/load()` 스냅샷 | ✅ 코드 완료 |
 | Phase 3 | LLM(GGUF, llama.cpp) 통합 — 검색 결과 기반 답변 생성 | ⏳ |
 | Phase 4 | 데모 앱 UI (`:app`) | ⏳ |
 
