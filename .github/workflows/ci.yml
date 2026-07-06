@@ -17,13 +17,19 @@ jobs:
       - uses: actions/checkout@v4
 
       # ⓪ C++ 코어 로직 테스트 — Android 없이 수 초 만에 실패를 잡는 1차 관문
-      - name: C++ vector_index 호스트 테스트
+      - name: C++ 호스트 테스트 (브루트포스 + HNSW)
         run: |
-          g++ -std=c++17 -O2 \
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
             rag-library/src/main/cpp/vector_index.cpp \
             rag-library/src/main/cpp/tests/vector_index_test.cpp \
             -o /tmp/vector_index_test
           /tmp/vector_index_test
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            rag-library/src/main/cpp/vector_index.cpp \
+            rag-library/src/main/cpp/hnsw_index.cpp \
+            rag-library/src/main/cpp/tests/hnsw_index_test.cpp \
+            -o /tmp/hnsw_index_test
+          /tmp/hnsw_index_test
 
       - uses: actions/setup-java@v4
         with:

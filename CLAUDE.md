@@ -16,21 +16,30 @@ Android 앱에 **완전 오프라인** AI 문서 검색을 넣는 오픈소스 K
 rag-library/src/main/
 ├── AndroidManifest.xml
 ├── cpp/
-│   ├── CMakeLists.txt         # add_library(rag-core SHARED native-lib.cpp rag_jni.cpp vector_index.cpp)
+│   ├── CMakeLists.txt         # add_library(rag-core SHARED native-lib rag_jni vector_index hnsw_index)
 │   ├── native-lib.cpp         # Phase 0 JNI 왕복 스모크(stringFromJNI)
-│   ├── vector_index.{h,cpp}   # 순수 C++ 브루트포스 코사인 top-k (JNI 무관 → 호스트 테스트 가능)
-│   ├── rag_jni.cpp            # NativeVectorIndex JNI 브리지 (핸들 기반 5개 함수)
-│   └── tests/vector_index_test.cpp  # 호스트(g++) 단독 실행 테스트 — CMake 타깃에 미포함
+│   ├── vector_index.{h,cpp}   # VectorIndex 추상 인터페이스 + BruteForceIndex + l2NormalizeInPlace
+│   ├── hnsw_index.{h,cpp}     # HnswIndex — HNSW 근사 최근접 이웃 (Phase 1)
+│   ├── rag_jni.cpp            # NativeVectorIndex JNI 브리지 (핸들 기반 6개 함수)
+│   └── tests/                 # 호스트(g++) 단독 실행 테스트 — CMake 타깃에 미포함
+│       ├── vector_index_test.cpp
+│       └── hnsw_index_test.cpp   # 소규모 정확성 + 브루트포스 대비 recall@10
 └── java/com/example/rag_library/
     ├── OnDeviceRAGCore.kt     # loadLibrary("rag-core") + stringFromJNI() (스모크)
-    ├── NativeVectorIndex.kt   # C++ 인덱스 래퍼 (internal, Closeable, @JvmStatic external)
+    ├── NativeVectorIndex.kt   # C++ 인덱스 래퍼 — bruteForce()/hnsw() 팩토리
     ├── Models.kt              # Chunk / SearchResult
     ├── TextChunker.kt         # 문장 경계 + overlap 청킹
-    ├── Embedder.kt            # 임베딩 인터페이스 (ONNX e5 교체 지점)
-    ├── HashingEmbedder.kt     # 문자 n-gram 해싱 임베더 (무모델 Phase 0 기본)
-    └── RagEngine.kt           # 공개 파사드: addDocument / search
-rag-library/src/test/…         # 호스트 유닛테스트 (TextChunker, HashingEmbedder)
-rag-library/src/androidTest/…  # 계측: OnDeviceRAGCoreTest, NativeVectorIndexTest, RagEngineTest(E2E)
+    ├── Embedder.kt            # 임베딩 인터페이스 (embed=passage, embedQuery=질의)
+    ├── HashingEmbedder.kt     # 문자 n-gram 해싱 임베더 (무모델 기본값)
+    ├── Tokenizer.kt           # 토크나이저 인터페이스
+    ├── UnigramTokenizer.kt    # SentencePiece Unigram 순수 Kotlin (Viterbi, vocab TSV)
+    ├── Pooling.kt             # mean pooling + L2 정규화
+    ├── OnnxEmbedder.kt        # ONNX Runtime + e5 (모델 파일은 scripts/prepare_model.py)
+    └── RagEngine.kt           # 공개 파사드: addDocument / search / IndexKind
+rag-library/src/test/…         # 호스트 유닛테스트 (Chunker/Hashing/Tokenizer/Pooling)
+rag-library/src/androidTest/…  # 계측: JNI 왕복, 인덱스(브루트/HNSW), RagEngine E2E,
+                               #      OnnxEmbedderTest(모델 파일 있을 때만, 없으면 skip)
+scripts/prepare_model.py       # e5 ONNX 내보내기 + tokenizer.json→vocab.tsv (개발 PC용)
 ```
 
 ## 툴체인 (repo 실제 고정값)
@@ -63,6 +72,11 @@ g++ -std=c++17 -O2 -Wall -Wextra -Werror \
   rag-library/src/main/cpp/vector_index.cpp \
   rag-library/src/main/cpp/tests/vector_index_test.cpp \
   -o /tmp/vector_index_test && /tmp/vector_index_test   # 기대 출력: ALL OK
+g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+  rag-library/src/main/cpp/vector_index.cpp \
+  rag-library/src/main/cpp/hnsw_index.cpp \
+  rag-library/src/main/cpp/tests/hnsw_index_test.cpp \
+  -o /tmp/hnsw_index_test && /tmp/hnsw_index_test       # 기대 출력: ALL OK (recall@10 포함)
 
 # ① C++17 컴파일 + CMake 링킹 확인 (librag-core.so 생성)
 ./gradlew :rag-library:externalNativeBuildDebug
@@ -89,7 +103,8 @@ g++ -std=c++17 -O2 -Wall -Wextra -Werror \
   - 예: `NativeVectorIndex#nativeAdd` → `Java_com_example_rag_1library_NativeVectorIndex_nativeAdd`
   - 한 글자라도 틀리면 런타임 `UnsatisfiedLinkError`. (함수가 더 늘면 `JNI_OnLoad` + `RegisterNatives` 검토.)
 - **정적/인스턴스**: `@JvmStatic`(companion) → `(JNIEnv*, jclass)`, 인스턴스 → `(JNIEnv*, jobject)`.
-  `NativeVectorIndex` 의 5개 함수는 전부 `@JvmStatic` + 핸들(jlong) 전달 방식.
+  `NativeVectorIndex` 의 6개 함수(nativeCreate/nativeCreateHnsw/nativeDestroy/nativeAdd/
+  nativeSize/nativeSearch)는 전부 `@JvmStatic` + 핸들(jlong) 전달 방식.
 - **라이브러리 이름 3중 일치**: `System.loadLibrary("rag-core")` ↔ `add_library(rag-core ...)` ↔ `librag-core.so`.
 - **FloatArray 전달 패턴**(rag_jni.cpp 참고): `GetPrimitiveArrayCritical` → `memcpy` → 즉시 `Release(..., JNI_ABORT)`.
   Critical 구간 안에서 JNI 호출·힙 할당·블로킹 금지. 출력은 `Set{Int,Float}ArrayRegion` 으로 out-배열에 기록.
@@ -101,11 +116,15 @@ g++ -std=c++17 -O2 -Wall -Wextra -Werror \
 - `local.properties` (기기별 SDK 경로).
 
 ## 로드맵 & 현재 위치
-- **Phase 0 (진행 중)**: ✅ JNI 왕복 뼈대 ✅ C++ 코사인 top-k 인덱스 ✅ JNI 브리지(FloatArray)
-  ✅ 청킹/해싱 임베더/RagEngine 파이프라인 — **남은 것: 실기기/CI 에서 ③ 초록불 확인**
-- **Phase 0.5 ← 다음 슬라이스**: ONNX Runtime + multilingual-e5-small 임베딩 (`Embedder` 구현체 교체).
-  토크나이저(SentencePiece) 통합이 핵심 난관 — onnxruntime-extensions 또는 그래프 내장 토크나이저 검토.
-- **Phase 1~3**: HNSW(동일 VectorIndex 인터페이스로 교체) · mmap 영속화 · LLM(GGUF).
+- **Phase 0**: ✅ JNI 왕복 뼈대 ✅ C++ 코사인 top-k ✅ JNI 브리지 ✅ 청킹/해싱 임베더/RagEngine
+  — 남은 것: 실기기/CI 에서 ③ 초록불 확인
+- **Phase 0.5 (코드 완료)**: ✅ UnigramTokenizer(순수 Kotlin SentencePiece, Viterbi)
+  ✅ OnnxEmbedder(ONNX Runtime 1.27.0 + e5 프리픽스) ✅ scripts/prepare_model.py
+  — **남은 것**: 개발 PC에서 모델 준비 → adb push → OnnxEmbedderTest 실기기 검증,
+  UnigramTokenizer 를 실제 e5 vocab 골든과 교차검증(`prepare_model.py --golden`)
+- **Phase 1 (코드 완료)**: ✅ HnswIndex(C++ HNSW, 호스트 recall@10=1.000 검증)
+  ✅ JNI(nativeCreateHnsw) ✅ RagEngine IndexKind 옵션 — 남은 것: 실기기 확인
+- **Phase 2~3**: mmap 인덱스 영속화 · LLM(GGUF, llama.cpp) 답변 생성.
 - **Phase 4**: 데모 앱 UI (`:app`).
 - ~~라이선스 정비~~ ✅ 완료: `LICENSE`(Apache-2.0) + `NOTICE` + `THIRD_PARTY_LICENSES.md` + `README.md`.
 
