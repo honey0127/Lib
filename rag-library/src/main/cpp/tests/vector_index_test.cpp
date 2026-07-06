@@ -27,7 +27,7 @@ bool near(float a, float b, float eps = 1e-5f) { return std::fabs(a - b) < eps; 
 }  // namespace
 
 int main() {
-    using rag::VectorIndex;
+    using VectorIndex = rag::BruteForceIndex;
 
     // 1) 정규화 + 코사인 값 + 정렬: 정규화 안 된 입력도 동일 결과여야 한다
     {
