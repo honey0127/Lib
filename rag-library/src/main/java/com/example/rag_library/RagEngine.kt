@@ -2,6 +2,15 @@ package com.example.rag_library
 
 import java.io.Closeable
 
+/** [RagEngine] 이 사용할 벡터 인덱스 백엔드. */
+enum class IndexKind {
+    /** 정확한 브루트포스 — 수천 청크까지 충분히 빠르고 결과가 항상 정확하다(기본). */
+    BRUTE_FORCE,
+
+    /** HNSW 근사 최근접 이웃 — 수만 청크 이상 대규모 코퍼스용(재현율 ≈ 1, 훨씬 빠름). */
+    HNSW,
+}
+
 /**
  * 온디바이스 RAG 파사드 — 문서 추가와 유사도 검색.
  *
@@ -19,9 +28,13 @@ import java.io.Closeable
 class RagEngine(
     private val embedder: Embedder = HashingEmbedder(),
     private val chunker: TextChunker = TextChunker(),
+    indexKind: IndexKind = IndexKind.BRUTE_FORCE,
 ) : Closeable {
 
-    private val index = NativeVectorIndex(embedder.dim)
+    private val index = when (indexKind) {
+        IndexKind.BRUTE_FORCE -> NativeVectorIndex.bruteForce(embedder.dim)
+        IndexKind.HNSW -> NativeVectorIndex.hnsw(embedder.dim)
+    }
     private val chunks = ArrayList<Chunk>()
     private var closed = false
 

@@ -41,4 +41,14 @@ class RagEngineTest {
             assertTrue(rag.search("하나", topK = 1).size <= 1)
         }
     }
+
+    @Test
+    fun endToEnd_withHnswIndex() {
+        RagEngine(indexKind = IndexKind.HNSW).use { rag ->
+            rag.addDocument("food", "김치는 발효 음식이다. 배추와 고춧가루로 만든다.")
+            rag.addDocument("space", "화성은 태양계의 네 번째 행성이다.")
+            val results = rag.search("김치", topK = 1)
+            assertEquals("food", results.single().chunk.docId)
+        }
+    }
 }

@@ -3,6 +3,7 @@
 #include <cstring>
 #include <vector>
 
+#include "hnsw_index.h"
 #include "vector_index.h"
 
 // com.example.rag_library.NativeVectorIndex 의 @JvmStatic external 함수 구현.
@@ -49,7 +50,21 @@ Java_com_example_rag_1library_NativeVectorIndex_nativeCreate(JNIEnv* env, jclass
         throwIllegalArgument(env, "dim must be > 0");
         return 0;
     }
-    return reinterpret_cast<jlong>(new rag::VectorIndex(dim));
+    return reinterpret_cast<jlong>(new rag::BruteForceIndex(dim));
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_example_rag_1library_NativeVectorIndex_nativeCreateHnsw(
+        JNIEnv* env, jclass, jint dim, jint m, jint efConstruction, jint efSearch) {
+    if (dim <= 0) {
+        throwIllegalArgument(env, "dim must be > 0");
+        return 0;
+    }
+    if (m < 2 || efConstruction < m || efSearch < 1) {
+        throwIllegalArgument(env, "invalid HNSW params (m>=2, efConstruction>=m, efSearch>=1)");
+        return 0;
+    }
+    return reinterpret_cast<jlong>(new rag::HnswIndex(dim, m, efConstruction, efSearch));
 }
 
 extern "C" JNIEXPORT void JNICALL

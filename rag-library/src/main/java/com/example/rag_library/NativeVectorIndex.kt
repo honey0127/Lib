@@ -5,19 +5,19 @@ import java.io.Closeable
 /**
  * C++ 벡터 인덱스(librag-core.so)의 얇은 JNI 래퍼.
  *
+ * 백엔드는 생성 팩토리로 선택한다:
+ * - [bruteForce]: 정확(exact) 전수 비교 — 수천 청크까지 기본값
+ * - [hnsw]: HNSW 근사 최근접 이웃 — 대규모 코퍼스용
+ *
  * - 스레드 안전하지 않다. 동기화는 상위 레이어([RagEngine])가 담당한다.
  * - 네이티브 힙 메모리를 쥐고 있으므로 사용 후 반드시 [close] (또는 `use {}`) 할 것.
  */
-internal class NativeVectorIndex(val dim: Int) : Closeable {
+internal class NativeVectorIndex private constructor(
+    val dim: Int,
+    private var handle: Long,
+) : Closeable {
 
     internal data class Hit(val id: Int, val score: Float)
-
-    private var handle: Long
-
-    init {
-        require(dim > 0) { "dim must be > 0" }
-        handle = nativeCreate(dim)
-    }
 
     fun add(id: Int, vector: FloatArray) {
         require(vector.size == dim) { "vector.size(${vector.size}) != dim($dim)" }
@@ -53,9 +53,39 @@ internal class NativeVectorIndex(val dim: Int) : Closeable {
             System.loadLibrary("rag-core")
         }
 
+        /** 정확(브루트포스) 인덱스. 수천 청크 규모까지는 이걸 쓴다(기본값). */
+        fun bruteForce(dim: Int): NativeVectorIndex {
+            require(dim > 0) { "dim must be > 0" }
+            return NativeVectorIndex(dim, nativeCreate(dim))
+        }
+
+        /**
+         * HNSW 근사 인덱스. 수만 청크 이상에서 브루트포스 대신 사용.
+         * @param m 레벨당 연결 수  @param efConstruction 삽입 beam 폭
+         * @param efSearch 검색 beam 폭(클수록 재현율↑, 느려짐)
+         */
+        fun hnsw(
+            dim: Int,
+            m: Int = 16,
+            efConstruction: Int = 200,
+            efSearch: Int = 64,
+        ): NativeVectorIndex {
+            require(dim > 0) { "dim must be > 0" }
+            require(m >= 2) { "m must be >= 2" }
+            require(efConstruction >= m) { "efConstruction must be >= m" }
+            require(efSearch >= 1) { "efSearch must be >= 1" }
+            return NativeVectorIndex(dim, nativeCreateHnsw(dim, m, efConstruction, efSearch))
+        }
+
         // 대응 C++ 심볼: Java_com_example_rag_1library_NativeVectorIndex_<이름>
         // @JvmStatic 이므로 네이티브 시그니처는 (JNIEnv*, jclass, ...) — CLAUDE.md JNI 규칙 참고
         @JvmStatic private external fun nativeCreate(dim: Int): Long
+        @JvmStatic private external fun nativeCreateHnsw(
+            dim: Int,
+            m: Int,
+            efConstruction: Int,
+            efSearch: Int,
+        ): Long
         @JvmStatic private external fun nativeDestroy(handle: Long)
         @JvmStatic private external fun nativeAdd(handle: Long, id: Int, vector: FloatArray)
         @JvmStatic private external fun nativeSize(handle: Long): Int

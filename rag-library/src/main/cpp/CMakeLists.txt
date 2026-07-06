@@ -14,6 +14,7 @@ add_library(
         native-lib.cpp
         rag_jni.cpp
         vector_index.cpp
+        hnsw_index.cpp
 )
 
 # 안드로이드 로그 라이브러리 등 링크

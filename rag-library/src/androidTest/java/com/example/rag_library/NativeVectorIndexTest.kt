@@ -14,7 +14,7 @@ class NativeVectorIndexTest {
 
     @Test
     fun cosineTopK_roundTripsThroughJni() {
-        NativeVectorIndex(3).use { idx ->
+        NativeVectorIndex.bruteForce(3).use { idx ->
             idx.add(10, floatArrayOf(2f, 0f, 0f))
             idx.add(11, floatArrayOf(0f, 5f, 0f))
             idx.add(12, floatArrayOf(3f, 3f, 0f))
@@ -31,7 +31,7 @@ class NativeVectorIndexTest {
 
     @Test
     fun kLargerThanSize_clampsToSize() {
-        NativeVectorIndex(2).use { idx ->
+        NativeVectorIndex.bruteForce(2).use { idx ->
             idx.add(1, floatArrayOf(1f, 0f))
             assertEquals(1, idx.search(floatArrayOf(1f, 0f), 10).size)
         }
@@ -39,14 +39,14 @@ class NativeVectorIndexTest {
 
     @Test(expected = IllegalArgumentException::class)
     fun dimMismatch_throws() {
-        NativeVectorIndex(3).use { idx ->
+        NativeVectorIndex.bruteForce(3).use { idx ->
             idx.add(1, floatArrayOf(1f, 0f)) // 길이 2 ≠ dim 3
         }
     }
 
     @Test(expected = IllegalStateException::class)
     fun useAfterClose_throws() {
-        val idx = NativeVectorIndex(2)
+        val idx = NativeVectorIndex.bruteForce(2)
         idx.close()
         idx.size()
     }
