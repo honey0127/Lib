@@ -56,6 +56,8 @@ kotlin {
 }
 
 dependencies {
+    // ONNX Runtime (임베딩 모델 추론). 모델 파일은 커밋 금지 — scripts/prepare_model.py 참고.
+    implementation(libs.onnxruntime.android)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
     testImplementation(libs.junit)

@@ -11,6 +11,13 @@ interface Embedder {
     /** 임베딩 차원. [RagEngine] 이 벡터 인덱스 생성 시 사용한다. */
     val dim: Int
 
-    /** [text]를 길이 [dim]의 벡터로 변환한다. 반환 벡터는 L2 정규화되어 있어야 한다(영벡터 제외). */
+    /** 문서(passage) [text]를 길이 [dim]의 벡터로 변환한다. 반환 벡터는 L2 정규화되어 있어야 한다(영벡터 제외). */
     fun embed(text: String): FloatArray
+
+    /**
+     * 검색 질의 [text]를 벡터로 변환한다.
+     * 기본은 [embed]와 동일(대칭 임베더). e5 처럼 질의/문서 프리픽스가 다른
+     * 비대칭 모델은 이 메서드를 오버라이드한다 ([OnnxEmbedder] 참고).
+     */
+    fun embedQuery(text: String): FloatArray = embed(text)
 }

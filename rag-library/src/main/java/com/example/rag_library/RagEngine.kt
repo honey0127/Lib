@@ -43,7 +43,7 @@ class RagEngine(
         checkOpen()
         require(topK > 0) { "topK must be > 0" }
         if (chunks.isEmpty() || query.isBlank()) return emptyList()
-        return index.search(embedder.embed(query), topK)
+        return index.search(embedder.embedQuery(query), topK)
             .map { SearchResult(chunks[it.id], it.score) }
     }
 
