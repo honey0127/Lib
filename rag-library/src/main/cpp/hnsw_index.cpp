@@ -4,7 +4,15 @@
 #include <cmath>
 #include <queue>
 
+#include "index_io.h"
+
 namespace rag {
+
+namespace {
+// 파일 로드 시 허용하는 최대 원소 수 (손상 파일의 과대 할당 방지, ~1GB)
+constexpr size_t kMaxLoadFloats = size_t(1) << 28;
+constexpr int32_t kMaxLevels = 64;
+}
 
 HnswIndex::HnswIndex(int32_t dim, int32_t m, int32_t efConstruction, int32_t efSearch,
                      uint64_t seed)
@@ -208,6 +216,105 @@ void HnswIndex::clear() {
     maxLevel_ = -1;
     visitedStamp_.clear();
     stamp_ = 0;
+}
+
+bool HnswIndex::writeBody(std::FILE* f) const {
+    if (!(io::writePod(f, m_) && io::writePod(f, efConstruction_) && io::writePod(f, efSearch_) &&
+          io::writePod(f, entry_) && io::writePod(f, maxLevel_))) {
+        return false;
+    }
+    if (!io::writeBytes(f, ids_.data(), ids_.size() * sizeof(int32_t)) ||
+        !io::writeBytes(f, data_.data(), data_.size() * sizeof(float))) {
+        return false;
+    }
+    for (const auto& nodeLinks : links_) {
+        const int32_t numLevels = static_cast<int32_t>(nodeLinks.size());
+        if (!io::writePod(f, numLevels)) {
+            return false;
+        }
+        for (const auto& neighbors : nodeLinks) {
+            const int32_t n = static_cast<int32_t>(neighbors.size());
+            if (!io::writePod(f, n) ||
+                !io::writeBytes(f, neighbors.data(), neighbors.size() * sizeof(int32_t))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool HnswIndex::readBody(std::FILE* f, int64_t count) {
+    if (count < 0 || dim_ <= 0) {
+        return false;
+    }
+    const size_t n = static_cast<size_t>(count);
+    if (n > kMaxLoadFloats / static_cast<size_t>(dim_)) {
+        return false;
+    }
+
+    int32_t m = 0, efc = 0, efs = 0, entry = -1, maxLevel = -1;
+    if (!(io::readPod(f, &m) && io::readPod(f, &efc) && io::readPod(f, &efs) &&
+          io::readPod(f, &entry) && io::readPod(f, &maxLevel))) {
+        return false;
+    }
+    if (m < 2 || efc < m || efs < 1) {
+        return false;
+    }
+    if (count == 0) {
+        if (entry != -1 || maxLevel != -1) {
+            return false;
+        }
+    } else if (entry < 0 || entry >= count || maxLevel < 0 || maxLevel >= kMaxLevels) {
+        return false;
+    }
+
+    m_ = m;
+    maxM0_ = 2 * m;
+    efConstruction_ = efc;
+    efSearch_ = efs;
+    levelMult_ = 1.0 / std::log(static_cast<double>(m_));
+    entry_ = entry;
+    maxLevel_ = maxLevel;
+
+    ids_.resize(n);
+    data_.resize(n * static_cast<size_t>(dim_));
+    if (!io::readBytes(f, ids_.data(), ids_.size() * sizeof(int32_t)) ||
+        !io::readBytes(f, data_.data(), data_.size() * sizeof(float))) {
+        return false;
+    }
+
+    links_.assign(n, {});
+    for (size_t i = 0; i < n; ++i) {
+        int32_t numLevels = 0;
+        if (!io::readPod(f, &numLevels) || numLevels < 1 || numLevels > kMaxLevels) {
+            return false;
+        }
+        links_[i].resize(static_cast<size_t>(numLevels));
+        for (int32_t lvl = 0; lvl < numLevels; ++lvl) {
+            int32_t neighborCount = 0;
+            if (!io::readPod(f, &neighborCount) || neighborCount < 0 || neighborCount > maxM0_) {
+                return false;
+            }
+            auto& neighbors = links_[i][static_cast<size_t>(lvl)];
+            neighbors.resize(static_cast<size_t>(neighborCount));
+            if (!io::readBytes(f, neighbors.data(), neighbors.size() * sizeof(int32_t))) {
+                return false;
+            }
+            for (const int32_t nb : neighbors) {
+                if (nb < 0 || nb >= count) {
+                    return false;
+                }
+            }
+        }
+    }
+    if (count > 0 &&
+        static_cast<size_t>(maxLevel_) >= links_[static_cast<size_t>(entry_)].size()) {
+        return false;
+    }
+
+    visitedStamp_.clear();
+    stamp_ = 0;
+    return true;
 }
 
 }  // namespace rag

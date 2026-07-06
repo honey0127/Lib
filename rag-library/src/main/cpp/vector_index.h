@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <vector>
 
 namespace rag {
@@ -37,11 +38,18 @@ public:
     virtual std::vector<SearchHit> topK(const float* query, int32_t k) const = 0;
 
     virtual void clear() = 0;
+
+    // ---- 직렬화 (index_io.h 의 saveIndex/loadIndex 가 호출 — 직접 사용은 내부용) ----
+    virtual uint32_t formatKind() const = 0;                  // 파일 헤더의 kind 값
+    virtual bool writeBody(std::FILE* f) const = 0;           // 공통 헤더 이후 본문 기록
+    virtual bool readBody(std::FILE* f, int64_t count) = 0;   // 빈 인스턴스에 본문 로드
 };
 
 // Phase 0: 브루트포스(전수 비교) 구현.
 class BruteForceIndex final : public VectorIndex {
 public:
+    static constexpr uint32_t kFormatKind = 1;
+
     explicit BruteForceIndex(int32_t dim);
 
     int32_t dim() const override { return dim_; }
@@ -49,6 +57,10 @@ public:
     void add(int32_t id, const float* vec) override;
     std::vector<SearchHit> topK(const float* query, int32_t k) const override;
     void clear() override;
+
+    uint32_t formatKind() const override { return kFormatKind; }
+    bool writeBody(std::FILE* f) const override;  // ids | data
+    bool readBody(std::FILE* f, int64_t count) override;
 
 private:
     int32_t dim_;

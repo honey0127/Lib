@@ -4,10 +4,14 @@
 #include <cmath>
 #include <cstring>
 
+#include "index_io.h"
+
 namespace rag {
 
 namespace {
 constexpr double kNormEps = 1e-12;
+// 파일 로드 시 허용하는 최대 원소 수 (손상 파일의 과대 할당 방지, ~1GB)
+constexpr size_t kMaxLoadFloats = size_t(1) << 28;
 }
 
 void l2NormalizeInPlace(float* v, int32_t dim) {
@@ -65,6 +69,25 @@ std::vector<SearchHit> BruteForceIndex::topK(const float* query, int32_t k) cons
 void BruteForceIndex::clear() {
     ids_.clear();
     data_.clear();
+}
+
+bool BruteForceIndex::writeBody(std::FILE* f) const {
+    return io::writeBytes(f, ids_.data(), ids_.size() * sizeof(int32_t)) &&
+           io::writeBytes(f, data_.data(), data_.size() * sizeof(float));
+}
+
+bool BruteForceIndex::readBody(std::FILE* f, int64_t count) {
+    if (count < 0 || dim_ <= 0) {
+        return false;
+    }
+    const size_t n = static_cast<size_t>(count);
+    if (n > kMaxLoadFloats / static_cast<size_t>(dim_)) {
+        return false;
+    }
+    ids_.resize(n);
+    data_.resize(n * static_cast<size_t>(dim_));
+    return io::readBytes(f, ids_.data(), ids_.size() * sizeof(int32_t)) &&
+           io::readBytes(f, data_.data(), data_.size() * sizeof(float));
 }
 
 }  // namespace rag

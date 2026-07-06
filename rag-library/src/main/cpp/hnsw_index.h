@@ -18,6 +18,8 @@ namespace rag {
 // - 결정성: 레벨 추첨이 내부 시드 고정 rng 를 쓰므로 같은 삽입 순서 → 같은 그래프.
 class HnswIndex final : public VectorIndex {
 public:
+    static constexpr uint32_t kFormatKind = 2;
+
     explicit HnswIndex(int32_t dim, int32_t m = 16, int32_t efConstruction = 200,
                        int32_t efSearch = 64, uint64_t seed = 42);
 
@@ -26,6 +28,13 @@ public:
     void add(int32_t id, const float* vec) override;
     std::vector<SearchHit> topK(const float* query, int32_t k) const override;
     void clear() override;
+
+    uint32_t formatKind() const override { return kFormatKind; }
+    // 본문: m | efC | efS | entry | maxLevel | ids | data | 노드별(레벨수, 레벨별 이웃수+이웃)
+    bool writeBody(std::FILE* f) const override;
+    // 로드 후 그래프는 저장 시점과 동일 → 검색 결과 동일. 이후 add() 는 새 rng 시퀀스 사용
+    // (그래프 품질 동일, 시드 기반 결정성만 저장 전과 달라짐).
+    bool readBody(std::FILE* f, int64_t count) override;
 
 private:
     struct Cand {
