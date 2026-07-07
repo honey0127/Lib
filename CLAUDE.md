@@ -10,7 +10,9 @@ Android 앱에 **완전 오프라인** AI 문서 검색을 넣는 오픈소스 K
 
 ## 모듈 구조
 - `:rag-library` — 라이브러리 본체(AAR). Kotlin API + `src/main/cpp` 의 C++/JNI 코어(`librag-core.so`). **개발의 중심.**
-- `:app` — 데모/수동 테스트용 앱 셸(namespace `com.example.lib`). 현재 UI 없음(res+manifest만). 데모 UI는 Phase 4에서 채운다.
+- `:app` — 데모 앱(namespace `com.example.lib`). `MainActivity` 단일 화면: 문서 추가/샘플 주입 →
+  질문 → 근거(유사도) + LLM 스트리밍 답변. 모델 파일은 `/data/local/tmp/rag-models/` 에서 자동 감지,
+  없으면 무모델 폴백(해싱 임베더·검색만). 엔진 접근은 단일 스레드 executor 로 직렬화.
 
 ```
 rag-library/src/main/
@@ -154,7 +156,9 @@ g++ -std=c++17 -O2 -Wall -Wextra -Werror \
 - **Phase 3 (코드 완료)**: ✅ llama.cpp b9893 정적 링크 ✅ LlmEngine(스트리밍 generate,
   UTF-8 경계) ✅ RagChat + QwenPromptBuilder(ChatML) — 호스트 스모크(vocab GGUF) 통과.
   — **남은 것**: Qwen2.5-1.5B GGUF 를 기기에 배치해 LlmEngineTest 실기기 검증(README 참고).
-- **Phase 4**: 데모 앱 UI (`:app`) — 시연영상(3분)용.
+- **Phase 4 (코드 완료)**: ✅ 데모 앱 UI (`:app` MainActivity) — 시연영상(3분)용.
+  `./gradlew :app:installDebug` 로 설치. CI build 잡이 `:app:assembleDebug` 컴파일 검증.
+  — 남은 것: 실기기에서 화면 확인 + 시연영상 촬영.
 - ~~라이선스 정비~~ ✅ 완료: `LICENSE`(Apache-2.0) + `NOTICE` + `THIRD_PARTY_LICENSES.md` + `README.md`.
 
 ## 대회 일정 (2026, 핵심 마감)

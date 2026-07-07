@@ -64,6 +64,16 @@ huggingface-cli download Qwen/Qwen2.5-1.5B-Instruct-GGUF \
 adb push models/qwen2.5-1.5b-instruct-q4_k_m.gguf /data/local/tmp/rag-models/llm.gguf
 ```
 
+### 데모 앱 실행 (Phase 4)
+
+```bash
+./gradlew :app:installDebug   # 기기/에뮬레이터에 데모 앱 설치
+```
+
+모델 파일이 `/data/local/tmp/rag-models/` 에 있으면 자동으로 사용한다
+(e5 ONNX → 시맨틱 검색, llm.gguf → 답변 생성). 없으면 무모델 폴백(해싱 임베더, 검색만)으로도 동작한다 —
+"샘플 문서 4개 넣기 → 질문" 만으로 오프라인 검색 데모가 된다.
+
 ## 빌드 & 검증
 
 사전 조건: Android SDK/NDK, JDK 21.
@@ -94,7 +104,7 @@ g++ -std=c++17 -O2 rag-library/src/main/cpp/vector_index.cpp \
 | Phase 1 | C++ HNSW 벡터 인덱스 (`IndexKind.HNSW`) | ✅ (CI 계측 통과, recall 1.0) |
 | Phase 2 | 인덱스 영속화 — `RagEngine.save()/load()` 스냅샷 | ✅ 코드 완료 |
 | Phase 3 | LLM 답변 생성 — llama.cpp(b9893) + Qwen GGUF, `RagChat` 스트리밍 | ✅ 코드 완료 (실기기 검증 대기) |
-| Phase 4 | 데모 앱 UI (`:app`) | ⏳ |
+| Phase 4 | 데모 앱 UI (`:app`) — 문서 추가/검색/스트리밍 답변 | ✅ 코드 완료 |
 
 ## 모델 가중치 정책
 

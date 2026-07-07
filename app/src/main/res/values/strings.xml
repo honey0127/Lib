@@ -1,3 +1,15 @@
 <resources>
-    <string name="app_name">Lib</string>
+    <string name="app_name">OnDevice RAG 데모</string>
+
+    <string name="status_initializing">엔진 초기화 중…</string>
+    <string name="section_documents">1. 문서 넣기</string>
+    <string name="doc_hint">여기에 문서 텍스트를 붙여넣으세요</string>
+    <string name="btn_add_doc">문서 추가</string>
+    <string name="btn_add_samples">샘플 문서 4개 넣기</string>
+    <string name="chunk_count_zero">인덱싱된 청크: 0</string>
+    <string name="section_question">2. 질문하기</string>
+    <string name="question_hint">예: 김치는 어떤 음식이야?</string>
+    <string name="btn_ask">검색 + 답변</string>
+    <string name="label_answer">답변</string>
+    <string name="label_sources">근거 문서 (유사도 순)</string>
 </resources>

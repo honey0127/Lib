@@ -44,9 +44,9 @@ jobs:
           java-version: '21'
           cache: gradle
 
-      # ①+② 유닛테스트(호스트 JVM) + 네이티브 포함 AAR 빌드
-      - name: 유닛테스트 + AAR 빌드
-        run: ./gradlew :rag-library:testDebugUnitTest :rag-library:assembleRelease
+      # ①+② 유닛테스트(호스트 JVM) + 네이티브 포함 AAR + 데모 앱 컴파일
+      - name: 유닛테스트 + AAR + 데모 앱 빌드
+        run: ./gradlew :rag-library:testDebugUnitTest :rag-library:assembleRelease :app:assembleDebug
 
       - uses: actions/upload-artifact@v4
         if: failure()
