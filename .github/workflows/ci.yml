@@ -12,7 +12,7 @@ jobs:
   build:
     name: C++ 호스트 테스트 + 유닛테스트 + AAR
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60  # llama.cpp(FetchContent) NDK 컴파일 포함
     steps:
       - uses: actions/checkout@v4
 
@@ -57,7 +57,7 @@ jobs:
   instrumented:
     name: JNI 왕복 계측 테스트 (에뮬레이터)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75  # llama.cpp(FetchContent) NDK 컴파일 + 에뮬레이터 부팅 포함
     steps:
       - uses: actions/checkout@v4
 

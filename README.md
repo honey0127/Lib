@@ -26,6 +26,8 @@ Kotlin API
    └─ NativeVectorIndex      JNI 브리지 (FloatArray ↔ C++, librag-core.so)
        ├─ BruteForceIndex    정확 전수 비교 (수천 청크까지 기본값)
        └─ HnswIndex          HNSW 근사 최근접 이웃 (대규모 코퍼스, recall@10≈1.0)
+└─ RagChat = RagEngine(검색) + LlmEngine(생성)
+   └─ LlmEngine              llama.cpp(b9893, 정적 링크) + GGUF — 검색 근거로 한국어 답변 생성
 ```
 
 ## 사용 예
@@ -47,6 +49,19 @@ RagEngine(embedder, indexKind = IndexKind.HNSW).use { rag -> /* ... */ }
 // 3) 스냅샷 — 재시작 시 재인덱싱 없이 즉시 복원
 rag.save(File(dir, "snapshot"))                  // snapshot.idx + snapshot.meta
 val restored = RagEngine.load(File(dir, "snapshot"))
+
+// 4) 답변 생성 (RAG 완성체) — 검색 근거로 LLM 이 한국어 답변 (백그라운드 스레드에서)
+val llm = LlmEngine.create("/path/llm.gguf")
+val answer = RagChat(rag, llm).ask("발효 음식이 뭐야?") { piece -> print(piece); true }
+println(answer.sources)                          // 근거 청크 (출처 표시)
+```
+
+### LLM 모델 준비 (Phase 3)
+
+```bash
+huggingface-cli download Qwen/Qwen2.5-1.5B-Instruct-GGUF \
+    qwen2.5-1.5b-instruct-q4_k_m.gguf --local-dir models
+adb push models/qwen2.5-1.5b-instruct-q4_k_m.gguf /data/local/tmp/rag-models/llm.gguf
 ```
 
 ## 빌드 & 검증
@@ -78,7 +93,7 @@ g++ -std=c++17 -O2 rag-library/src/main/cpp/vector_index.cpp \
 | Phase 0.5 | ONNX Runtime + e5 임베딩 + 순수 Kotlin SentencePiece 토크나이저 | ✅ 코드 완료 (실기기 검증 대기) |
 | Phase 1 | C++ HNSW 벡터 인덱스 (`IndexKind.HNSW`) | ✅ (CI 계측 통과, recall 1.0) |
 | Phase 2 | 인덱스 영속화 — `RagEngine.save()/load()` 스냅샷 | ✅ 코드 완료 |
-| Phase 3 | LLM(GGUF, llama.cpp) 통합 — 검색 결과 기반 답변 생성 | ⏳ |
+| Phase 3 | LLM 답변 생성 — llama.cpp(b9893) + Qwen GGUF, `RagChat` 스트리밍 | ✅ 코드 완료 (실기기 검증 대기) |
 | Phase 4 | 데모 앱 UI (`:app`) | ⏳ |
 
 ## 모델 가중치 정책

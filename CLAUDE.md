@@ -21,11 +21,14 @@ rag-library/src/main/
 │   ├── vector_index.{h,cpp}   # VectorIndex 추상 인터페이스 + BruteForceIndex + l2NormalizeInPlace
 │   ├── hnsw_index.{h,cpp}     # HnswIndex — HNSW 근사 최근접 이웃 (Phase 1)
 │   ├── index_io.{h,cpp}       # saveIndex/loadIndex — 'RAG1' 단일 바이너리 직렬화 (Phase 2)
+│   ├── llm_engine.{h,cpp}     # llama.cpp 래퍼 — 로드/토크나이즈/생성 + UTF-8 경계 (Phase 3)
 │   ├── rag_jni.cpp            # NativeVectorIndex JNI 브리지 (핸들 기반 9개 함수)
+│   ├── llm_jni.cpp            # NativeLlm JNI 브리지 (4개 함수, ByteArray UTF-8 왕복)
 │   └── tests/                 # 호스트(g++) 단독 실행 테스트 — CMake 타깃에 미포함
 │       ├── vector_index_test.cpp
 │       ├── hnsw_index_test.cpp   # 소규모 정확성 + 브루트포스 대비 recall@10
-│       └── index_io_test.cpp     # 저장/복원 왕복 + 손상 파일 거부
+│       ├── index_io_test.cpp     # 저장/복원 왕복 + 손상 파일 거부
+│       └── llm_engine_smoke.cpp  # llama.cpp 링크 + vocab GGUF 스모크 (수동, 파일 상단 명령 참고)
 └── java/com/example/rag_library/
     ├── OnDeviceRAGCore.kt     # loadLibrary("rag-core") + stringFromJNI() (스모크)
     ├── NativeVectorIndex.kt   # C++ 인덱스 래퍼 — bruteForce()/hnsw()/load() + save()
@@ -38,10 +41,14 @@ rag-library/src/main/
     ├── UnigramTokenizer.kt    # SentencePiece Unigram 순수 Kotlin (Viterbi, vocab TSV)
     ├── Pooling.kt             # mean pooling + L2 정규화
     ├── OnnxEmbedder.kt        # ONNX Runtime + e5 (모델 파일은 scripts/prepare_model.py)
-    └── RagEngine.kt           # 공개 파사드: addDocument / search / IndexKind / save / load
-rag-library/src/test/…         # 호스트 유닛테스트 (Chunker/Hashing/Tokenizer/Pooling/ChunkStore)
-rag-library/src/androidTest/…  # 계측: JNI 왕복, 인덱스(브루트/HNSW), RagEngine E2E,
-                               #      OnnxEmbedderTest(모델 파일 있을 때만, 없으면 skip)
+    ├── RagEngine.kt           # 공개 파사드: addDocument / search / IndexKind / save / load
+    ├── NativeLlm.kt           # LLM JNI 브리지 (internal object, ByteArray UTF-8)
+    ├── LlmEngine.kt           # 공개 LLM 래퍼 — create/generate(스트리밍)/countTokens
+    ├── QwenPromptBuilder.kt   # ChatML RAG 프롬프트 (문서 근거 고정 시스템 프롬프트)
+    └── RagChat.kt             # 공개 완성체: 검색 + 답변 생성 (ask + sources)
+rag-library/src/test/…         # 호스트 유닛테스트 (Chunker/Hashing/Tokenizer/Pooling/ChunkStore/Prompt)
+rag-library/src/androidTest/…  # 계측: JNI 왕복, 인덱스(브루트/HNSW), RagEngine E2E, 영속화,
+                               #      OnnxEmbedderTest·LlmEngineTest(모델 파일 있을 때만, 없으면 skip)
 scripts/prepare_model.py       # e5 ONNX 내보내기 + tokenizer.json→vocab.tsv (개발 PC용)
 ```
 
@@ -59,6 +66,10 @@ scripts/prepare_model.py       # e5 ONNX 내보내기 + tokenizer.json→vocab.t
 | NDK | SDK 기본값(미고정) | 재현성 위해 `ndkVersion` 고정 권장 |
 | C++ | 17 | `cppFlags` / `CMakeLists.txt` |
 | ABI | arm64-v8a, x86_64 | `rag-library` `defaultConfig.ndk.abiFilters` |
+| llama.cpp | **태그 b9893 고정** (CMake FetchContent, 정적 링크) | `cpp/CMakeLists.txt` |
+
+> llama.cpp 업그레이드 시: CMakeLists 의 태그만 바꾸지 말고, tests/llm_engine_smoke.cpp 를
+> 새 태그로 빌드·실행해 API 호환(이름 변경 잦음)을 먼저 확인할 것.
 
 > ⚠️ **Kotlin 플러그인을 별도로 적용하지 말 것**: AGP 9.0+ 는 built-in Kotlin support 가 기본
 > 활성화(`android.builtInKotlin=true`)돼 있어 `org.jetbrains.kotlin.android`(`kotlin-android`)를
@@ -107,7 +118,10 @@ g++ -std=c++17 -O2 -Wall -Wextra -Werror \
 → **SDK 없는 환경(클라우드 세션)에서도 push 후 Actions 탭에서 초록불 확인 가능.**
 
 ## JNI 규칙 — 새 네이티브 함수 추가 시 필독
-- **패키지/클래스**: Kotlin `com.example.rag_library`. 네이티브 클래스: `OnDeviceRAGCore`(스모크), `NativeVectorIndex`(인덱스).
+- **패키지/클래스**: Kotlin `com.example.rag_library`. 네이티브 클래스: `OnDeviceRAGCore`(스모크), `NativeVectorIndex`(인덱스), `NativeLlm`(LLM).
+- **텍스트 전달 규약(NativeLlm)**: 프롬프트/생성 결과는 `ByteArray`(표준 UTF-8) 로 왕복 —
+  `jstring`(Modified UTF-8)은 이모지 등 보충 평면에서 변형됨. 스트리밍 콜백은 C++ 쪽
+  `completeUtf8Prefix` 가 문자 경계를 보장한 조각만 올린다.
 - **심볼 이름**: `Java_<패키지경로(_구분)>_<클래스>_<메서드>`. 패키지명 안의 `_`는 **`_1`로 이스케이프**.
   - 예: `NativeVectorIndex#nativeAdd` → `Java_com_example_rag_1library_NativeVectorIndex_nativeAdd`
   - 한 글자라도 틀리면 런타임 `UnsatisfiedLinkError`. (함수가 더 늘면 `JNI_OnLoad` + `RegisterNatives` 검토.)
@@ -137,8 +151,10 @@ g++ -std=c++17 -O2 -Wall -Wextra -Werror \
 - **Phase 2 (코드 완료)**: ✅ index_io 직렬화('RAG1' 포맷, mmap 친화 레이아웃)
   ✅ NativeVectorIndex.save/load ✅ RagEngine.save/load(청크 메타 포함 스냅샷)
   — 남은 것: CI/실기기 확인. mmap 제로카피 로드는 추후 최적화 항목.
-- **Phase 3**: LLM(GGUF, llama.cpp) 답변 생성.
-- **Phase 4**: 데모 앱 UI (`:app`).
+- **Phase 3 (코드 완료)**: ✅ llama.cpp b9893 정적 링크 ✅ LlmEngine(스트리밍 generate,
+  UTF-8 경계) ✅ RagChat + QwenPromptBuilder(ChatML) — 호스트 스모크(vocab GGUF) 통과.
+  — **남은 것**: Qwen2.5-1.5B GGUF 를 기기에 배치해 LlmEngineTest 실기기 검증(README 참고).
+- **Phase 4**: 데모 앱 UI (`:app`) — 시연영상(3분)용.
 - ~~라이선스 정비~~ ✅ 완료: `LICENSE`(Apache-2.0) + `NOTICE` + `THIRD_PARTY_LICENSES.md` + `README.md`.
 
 ## 대회 일정 (2026, 핵심 마감)
