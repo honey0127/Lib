@@ -20,16 +20,18 @@ rag-library/src/main/
 ├── cpp/
 │   ├── CMakeLists.txt         # add_library(rag-core SHARED native-lib rag_jni vector_index hnsw_index index_io)
 │   ├── native-lib.cpp         # Phase 0 JNI 왕복 스모크(stringFromJNI)
+│   ├── dot_product.h          # SIMD 내적 (NEON/SSE2/스칼라) — 검색 핫루프
 │   ├── vector_index.{h,cpp}   # VectorIndex 추상 인터페이스 + BruteForceIndex + l2NormalizeInPlace
-│   ├── hnsw_index.{h,cpp}     # HnswIndex — HNSW 근사 최근접 이웃 (Phase 1)
+│   ├── hnsw_index.{h,cpp}     # HnswIndex — HNSW + 다양성 휴리스틱(Algorithm 4) (Phase 1)
 │   ├── index_io.{h,cpp}       # saveIndex/loadIndex — 'RAG1' 단일 바이너리 직렬화 (Phase 2)
 │   ├── llm_engine.{h,cpp}     # llama.cpp 래퍼 — 로드/토크나이즈/생성 + UTF-8 경계 (Phase 3)
 │   ├── rag_jni.cpp            # NativeVectorIndex JNI 브리지 (핸들 기반 9개 함수)
 │   ├── llm_jni.cpp            # NativeLlm JNI 브리지 (4개 함수, ByteArray UTF-8 왕복)
 │   └── tests/                 # 호스트(g++) 단독 실행 테스트 — CMake 타깃에 미포함
-│       ├── vector_index_test.cpp
+│       ├── vector_index_test.cpp # + SIMD dotProduct 스칼라 대비 검증
 │       ├── hnsw_index_test.cpp   # 소규모 정확성 + 브루트포스 대비 recall@10
 │       ├── index_io_test.cpp     # 저장/복원 왕복 + 손상 파일 거부
+│       ├── bench.cpp             # 성능 벤치마크 (수동 — 아래 '성능' 참고)
 │       └── llm_engine_smoke.cpp  # llama.cpp 링크 + vocab GGUF 스모크 (수동, 파일 상단 명령 참고)
 └── java/com/example/rag_library/
     ├── OnDeviceRAGCore.kt     # loadLibrary("rag-core") + stringFromJNI() (스모크)
@@ -136,6 +138,17 @@ g++ -std=c++17 -O2 -Wall -Wextra -Werror \
   Critical 구간 안에서 JNI 호출·힙 할당·블로킹 금지. 출력은 `Set{Int,Float}ArrayRegion` 으로 out-배열에 기록.
 - **심볼 사전 검증(로컬/클라우드 공통)**: JDK 헤더로 컴파일 후 `nm` 확인 —
   `g++ -std=c++17 -I$JAVA_HOME/include -I$JAVA_HOME/include/linux -fPIC -c rag_jni.cpp && nm -g rag_jni.o | grep Java_`
+
+## 성능 (호스트 x86_64 벤치마크 — dim=384·N=20k·무작위 데이터 = 최악 조건)
+측정 도구: `tests/bench.cpp` (파일 상단 명령으로 수동 실행 — CI 러너 타이밍은 노이즈라 미포함).
+- SIMD 내적(`dot_product.h`, arm64=NEON·x86_64=SSE2) 적용 효과:
+  브루트 검색 8.79 → **1.68 ms/질의**(5.2×), HNSW 빌드 60.4 → 16.7 s, HNSW 검색 0.48 ms/질의.
+- 브루트포스 topK 는 k-힙 방식(후보 전체 배열 미생성, O(k) 메모리).
+- **HNSW recall 은 hnswlib(레퍼런스)와 동률** — 동일 데이터·파라미터에서 ef 100/200/400/800
+  스윕 전 구간 ±0.02 이내 (mine 0.352/0.565/0.779/0.923 vs hnswlib 0.365/0.582/0.793/0.935).
+  무작위 고차원은 거리 집중으로 재현율이 낮게 나오는 최악 조건이며, 구조가 있는 실제
+  임베딩(e5)에선 같은 ef 에서 훨씬 높다. 기본 efSearch=128.
+- HNSW 이웃 선택은 Malkov Algorithm 4 다양성 휴리스틱(+keepPruned) 사용.
 
 ## 절대 커밋 금지
 - 모델 가중치: `*.onnx`, `*.gguf`, `*.task`, `*.tflite`, `/models/` — 재배포 라이선스 문제 + GitHub 100MB 제한. 앱 최초 실행 시 다운로드하는 설계.

@@ -25,7 +25,11 @@ class HashingEmbedder(override val dim: Int = 256) : Embedder {
         for (n in 1..3) {
             if (t.length < n) break
             for (i in 0..t.length - n) {
-                val h = mix(t.substring(i, i + n).hashCode())
+                // String.hashCode 와 동일한 31-다항 해시를 문자에서 직접 계산 —
+                // n-gram 마다 substring 객체를 만들지 않는다 (핫루프 할당 제로)
+                var raw = 0
+                for (j in i until i + n) raw = 31 * raw + t[j].code
+                val h = mix(raw)
                 val idx = Math.floorMod(h, dim)
                 val sign = if (((h ushr 20) and 1) == 0) 1f else -1f
                 vec[idx] += sign

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <queue>
 
+#include "dot_product.h"
 #include "index_io.h"
 
 namespace rag {
@@ -25,12 +26,7 @@ HnswIndex::HnswIndex(int32_t dim, int32_t m, int32_t efConstruction, int32_t efS
       rng_(seed) {}
 
 float HnswIndex::distTo(const float* q, int32_t node) const {
-    const float* r = row(node);
-    float dot = 0.0f;
-    for (int32_t j = 0; j < dim_; ++j) {
-        dot += r[j] * q[j];
-    }
-    return 1.0f - dot;
+    return 1.0f - dotProduct(row(node), q, dim_);
 }
 
 int32_t HnswIndex::randomLevel() {
@@ -118,28 +114,74 @@ std::vector<HnswIndex::Cand> HnswIndex::searchLayer(const float* q, int32_t entr
     return out;
 }
 
+std::vector<HnswIndex::Cand> HnswIndex::selectNeighbors(const std::vector<Cand>& cands,
+                                                        int32_t m) const {
+    if (static_cast<int32_t>(cands.size()) <= m) {
+        return cands;
+    }
+    std::vector<Cand> result;
+    result.reserve(static_cast<size_t>(m));
+    std::vector<Cand> discarded;
+    for (const Cand& c : cands) {  // dist 오름차순 순회
+        if (static_cast<int32_t>(result.size()) >= m) {
+            break;
+        }
+        const float* cRow = row(c.node);
+        bool diverse = true;
+        for (const Cand& r : result) {
+            // 이미 뽑힌 이웃 r 이 질의점보다 후보 c 에 더 가까우면 c 는 중복 방향 → 보류
+            if (distTo(cRow, r.node) < c.dist) {
+                diverse = false;
+                break;
+            }
+        }
+        if (diverse) {
+            result.push_back(c);
+        } else {
+            discarded.push_back(c);
+        }
+    }
+    // keepPrunedConnections: 모자라면 보류분에서 가까운 순으로 채움 (연결성 보장)
+    for (const Cand& c : discarded) {
+        if (static_cast<int32_t>(result.size()) >= m) {
+            break;
+        }
+        result.push_back(c);
+    }
+    return result;
+}
+
 void HnswIndex::linkNeighbors(int32_t node, int32_t level, const std::vector<Cand>& cands) {
     const int32_t cap = (level == 0) ? maxM0_ : m_;
-    const int32_t take = std::min(m_, static_cast<int32_t>(cands.size()));
+    const std::vector<Cand> selected = selectNeighbors(cands, m_);
 
     auto& mine = links_[static_cast<size_t>(node)][static_cast<size_t>(level)];
     mine.clear();
-    mine.reserve(static_cast<size_t>(take));
-    for (int32_t i = 0; i < take; ++i) {
-        mine.push_back(cands[static_cast<size_t>(i)].node);
+    mine.reserve(selected.size());
+    for (const Cand& c : selected) {
+        mine.push_back(c.node);
     }
 
-    // 역방향 연결 + 용량 초과 시 가까운 cap 개만 유지
-    for (int32_t i = 0; i < take; ++i) {
-        const int32_t nb = cands[static_cast<size_t>(i)].node;
+    // 역방향 연결 + 용량 초과 시 휴리스틱으로 재선택
+    for (const Cand& c : selected) {
+        const int32_t nb = c.node;
         auto& theirs = links_[static_cast<size_t>(nb)][static_cast<size_t>(level)];
         theirs.push_back(node);
         if (static_cast<int32_t>(theirs.size()) > cap) {
             const float* nbRow = row(nb);
-            std::sort(theirs.begin(), theirs.end(), [&](int32_t a, int32_t b) {
-                return distTo(nbRow, a) < distTo(nbRow, b);
-            });
-            theirs.resize(static_cast<size_t>(cap));
+            std::vector<Cand> nbCands;
+            nbCands.reserve(theirs.size());
+            for (const int32_t x : theirs) {
+                nbCands.push_back({distTo(nbRow, x), x});
+            }
+            std::sort(nbCands.begin(), nbCands.end(),
+                      [](const Cand& a, const Cand& b) { return a.dist < b.dist; });
+            const std::vector<Cand> keep = selectNeighbors(nbCands, cap);
+            theirs.clear();
+            theirs.reserve(keep.size());
+            for (const Cand& x : keep) {
+                theirs.push_back(x.node);
+            }
         }
     }
 }

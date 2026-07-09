@@ -69,13 +69,14 @@ internal class NativeVectorIndex private constructor(
         /**
          * HNSW 근사 인덱스. 수만 청크 이상에서 브루트포스 대신 사용.
          * @param m 레벨당 연결 수  @param efConstruction 삽입 beam 폭
-         * @param efSearch 검색 beam 폭(클수록 재현율↑, 느려짐)
+         * @param efSearch 검색 beam 폭 — 클수록 재현율↑/느려짐.
+         *   (무작위 최악 데이터 기준 재현율은 cpp/tests/bench.cpp 로 측정; 실제 임베딩은 더 높다)
          */
         fun hnsw(
             dim: Int,
             m: Int = 16,
             efConstruction: Int = 200,
-            efSearch: Int = 64,
+            efSearch: Int = 128,
         ): NativeVectorIndex {
             require(dim > 0) { "dim must be > 0" }
             require(m >= 2) { "m must be >= 2" }

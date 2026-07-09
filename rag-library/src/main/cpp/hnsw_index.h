@@ -21,7 +21,7 @@ public:
     static constexpr uint32_t kFormatKind = 2;
 
     explicit HnswIndex(int32_t dim, int32_t m = 16, int32_t efConstruction = 200,
-                       int32_t efSearch = 64, uint64_t seed = 42);
+                       int32_t efSearch = 128, uint64_t seed = 42);
 
     int32_t dim() const override { return dim_; }
     size_t size() const override { return ids_.size(); }
@@ -51,7 +51,11 @@ private:
     int32_t greedyClosest(const float* q, int32_t start, int32_t level) const;
     // level 그래프에서 entry 기준 ef 개 근접 후보를 dist 오름차순으로 반환
     std::vector<Cand> searchLayer(const float* q, int32_t entry, int32_t level, int32_t ef) const;
-    // node 와 후보들을 양방향 연결하고, 초과 연결은 가까운 순으로 가지치기
+    // Malkov Algorithm 4 — 다양성 휴리스틱 이웃 선택 (cands 는 dist 오름차순).
+    // 후보가 이미 뽑힌 이웃보다 질의점에 더 가까울 때만 채택해 방향 다양성을 확보한다.
+    // (고차원·대규모에서 단순 최근접 M개 선택은 재현율을 무너뜨린다 — bench.cpp 로 검증)
+    std::vector<Cand> selectNeighbors(const std::vector<Cand>& cands, int32_t m) const;
+    // node 와 선택된 이웃을 양방향 연결하고, 초과 연결은 휴리스틱으로 재선택
     void linkNeighbors(int32_t node, int32_t level, const std::vector<Cand>& cands);
 
     int32_t dim_;

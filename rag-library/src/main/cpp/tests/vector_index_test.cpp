@@ -10,6 +10,10 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <random>
+#include <vector>
+
+#include "../dot_product.h"
 
 namespace {
 
@@ -93,6 +97,25 @@ int main() {
         idx.clear();
         expect(idx.size() == 0, "clear -> size 0");
         expect(idx.topK(e0, 3).empty(), "clear -> empty topK");
+    }
+
+    // 5.5) SIMD dotProduct == 스칼라 참조 (홀수 길이 꼬리 포함, 허용 오차 내)
+    {
+        std::mt19937 gen(42);
+        std::uniform_real_distribution<float> ud(-1.0f, 1.0f);
+        for (int32_t dim = 1; dim <= 80; ++dim) {
+            std::vector<float> a(static_cast<size_t>(dim));
+            std::vector<float> b(static_cast<size_t>(dim));
+            for (auto& x : a) x = ud(gen);
+            for (auto& x : b) x = ud(gen);
+            float ref = 0.0f;
+            for (int32_t j = 0; j < dim; ++j) ref += a[static_cast<size_t>(j)] * b[static_cast<size_t>(j)];
+            const float got = rag::dotProduct(a.data(), b.data(), dim);
+            if (std::fabs(got - ref) > 1e-4f) {
+                std::printf("FAIL: dotProduct dim=%d got=%f ref=%f\n", dim, got, ref);
+                ++g_failures;
+            }
+        }
     }
 
     // 6) 큰 차원(임베딩 크기 수준)에서 자기 자신 검색

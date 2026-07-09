@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 
+#include "dot_product.h"
 #include "index_io.h"
 
 namespace rag {
@@ -49,21 +50,26 @@ std::vector<SearchHit> BruteForceIndex::topK(const float* query, int32_t k) cons
     std::vector<float> q(query, query + dim_);
     l2NormalizeInPlace(q.data(), dim_);
 
-    std::vector<SearchHit> hits;
-    hits.reserve(static_cast<size_t>(n));
+    // 크기 kk 의 min-heap(최저 점수가 top) 유지 — 전체 n 개 후보 배열을 만들지 않는다.
+    const auto worstOnTop = [](const SearchHit& a, const SearchHit& b) {
+        return a.score > b.score;
+    };
+    std::vector<SearchHit> heap;
+    heap.reserve(static_cast<size_t>(kk));
     for (int32_t i = 0; i < n; ++i) {
         const float* row = data_.data() + static_cast<size_t>(i) * dim_;
-        float dot = 0.0f;
-        for (int32_t j = 0; j < dim_; ++j) {
-            dot += row[j] * q[j];
+        const float dot = dotProduct(row, q.data(), dim_);
+        if (static_cast<int32_t>(heap.size()) < kk) {
+            heap.push_back({ids_[i], dot});
+            std::push_heap(heap.begin(), heap.end(), worstOnTop);
+        } else if (dot > heap.front().score) {
+            std::pop_heap(heap.begin(), heap.end(), worstOnTop);
+            heap.back() = {ids_[i], dot};
+            std::push_heap(heap.begin(), heap.end(), worstOnTop);
         }
-        hits.push_back({ids_[i], dot});
     }
-
-    std::partial_sort(hits.begin(), hits.begin() + kk, hits.end(),
-                      [](const SearchHit& a, const SearchHit& b) { return a.score > b.score; });
-    hits.resize(static_cast<size_t>(kk));
-    return hits;
+    std::sort_heap(heap.begin(), heap.end(), worstOnTop);  // 점수 내림차순 정렬로 마무리
+    return heap;
 }
 
 void BruteForceIndex::clear() {
