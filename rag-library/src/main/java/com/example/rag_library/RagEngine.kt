@@ -83,6 +83,14 @@ class RagEngine private constructor(
     @Synchronized
     fun chunkCount(): Int = chunks.size
 
+    /** 모든 문서/청크를 비운다. 인덱스 백엔드와 파라미터는 유지된다. */
+    @Synchronized
+    fun clear() {
+        checkOpen()
+        index.clear()
+        chunks.clear()
+    }
+
     /**
      * 현재 상태를 `<baseFile>.idx`(네이티브 인덱스) + `<baseFile>.meta`(청크 텍스트)로 저장한다.
      * 임베더 자체는 저장되지 않는다 — [load] 시 저장 때와 같은 임베더를 넘겨야 한다.

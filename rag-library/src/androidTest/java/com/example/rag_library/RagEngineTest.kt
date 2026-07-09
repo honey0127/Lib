@@ -43,6 +43,21 @@ class RagEngineTest {
     }
 
     @Test
+    fun clear_emptiesIndex_andAllowsReuse() {
+        RagEngine().use { rag ->
+            rag.addDocument("food", "김치는 발효 음식이다.")
+            assertTrue(rag.chunkCount() > 0)
+
+            rag.clear()
+            assertEquals(0, rag.chunkCount())
+            assertTrue(rag.search("김치").isEmpty())
+
+            rag.addDocument("space", "화성은 붉은 행성이다.")
+            assertEquals("space", rag.search("화성", topK = 1).single().chunk.docId)
+        }
+    }
+
+    @Test
     fun endToEnd_withHnswIndex() {
         RagEngine(indexKind = IndexKind.HNSW).use { rag ->
             rag.addDocument("food", "김치는 발효 음식이다. 배추와 고춧가루로 만든다.")

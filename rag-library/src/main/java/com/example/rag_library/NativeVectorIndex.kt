@@ -38,6 +38,9 @@ internal class NativeVectorIndex private constructor(
 
     fun size(): Int = nativeSize(checkOpen())
 
+    /** 모든 벡터를 비운다(백엔드/파라미터는 유지). */
+    fun clear() = nativeClear(checkOpen())
+
     /** 인덱스를 [file]에 저장한다(백엔드·그래프 포함). 실패 시 [IOException]. */
     fun save(file: File) {
         nativeSave(checkOpen(), file.absolutePath)
@@ -104,6 +107,7 @@ internal class NativeVectorIndex private constructor(
             efSearch: Int,
         ): Long
         @JvmStatic private external fun nativeDestroy(handle: Long)
+        @JvmStatic private external fun nativeClear(handle: Long)
         @JvmStatic private external fun nativeSave(handle: Long, path: String)
         @JvmStatic private external fun nativeLoad(path: String): Long
         @JvmStatic private external fun nativeDim(handle: Long): Int

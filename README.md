@@ -125,6 +125,10 @@ HNSW 재현율은 동일 데이터·파라미터에서 레퍼런스 구현(hnswl
 모델 가중치(`*.onnx`, `*.gguf` 등)는 재배포 라이선스와 용량 문제로 **저장소에 포함하지 않는다**.
 앱 최초 실행 시 원 출처에서 다운로드하는 설계다. 출처·라이선스는 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) 참고.
 
-## 라이선스
+## 라이선스 및 대회 규정 준수
 
-[Apache License 2.0](LICENSE) · 서드파티: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)
+- 직접 작성한 전체 소스코드: [Apache License 2.0](LICENSE) (OSI 인증) + [NOTICE](NOTICE)
+- 서드파티 라이브러리·모델 출처/라이선스: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)
+- AI 모델 활용 명세(운영규정 제9조 대응 — 오픈웨이트 이상·온디바이스 구동·API 의존 없음):
+  [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) 하단 표 참고
+- 모델 가중치는 저장소에 포함하지 않고 원 출처(Hugging Face)에서 내려받는다

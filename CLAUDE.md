@@ -10,9 +10,11 @@ Android 앱에 **완전 오프라인** AI 문서 검색을 넣는 오픈소스 K
 
 ## 모듈 구조
 - `:rag-library` — 라이브러리 본체(AAR). Kotlin API + `src/main/cpp` 의 C++/JNI 코어(`librag-core.so`). **개발의 중심.**
-- `:app` — 데모 앱(namespace `com.example.lib`). `MainActivity` 단일 화면: 문서 추가/샘플 주입 →
-  질문 → 근거(유사도) + LLM 스트리밍 답변. 모델 파일은 `/data/local/tmp/rag-models/` 에서 자동 감지,
-  없으면 무모델 폴백(해싱 임베더·검색만). 엔진 접근은 단일 스레드 executor 로 직렬화.
+- `:app` — 데모 앱(namespace `com.example.lib`). `MainActivity` 단일 화면: 문서 추가/샘플 주입(1회)
+  → 질문 → 근거(유사도) + LLM 스트리밍 답변 + 처리시간(ms) 표시. 초기화/저장/불러오기 버튼으로
+  RagEngine.clear/save/load 시연. 모델 파일은 `/data/local/tmp/rag-models/` 에서 자동 감지,
+  없으면 무모델 폴백(해싱 임베더·검색만 — 같은 언어 표면 매칭임을 상태줄에 안내).
+  엔진 접근은 단일 스레드 executor 로 직렬화.
 
 ```
 rag-library/src/main/
@@ -25,7 +27,7 @@ rag-library/src/main/
 │   ├── hnsw_index.{h,cpp}     # HnswIndex — HNSW + 다양성 휴리스틱(Algorithm 4) (Phase 1)
 │   ├── index_io.{h,cpp}       # saveIndex/loadIndex — 'RAG1' 단일 바이너리 직렬화 (Phase 2)
 │   ├── llm_engine.{h,cpp}     # llama.cpp 래퍼 — 로드/토크나이즈/생성 + UTF-8 경계 (Phase 3)
-│   ├── rag_jni.cpp            # NativeVectorIndex JNI 브리지 (핸들 기반 9개 함수)
+│   ├── rag_jni.cpp            # NativeVectorIndex JNI 브리지 (핸들 기반 10개 함수)
 │   ├── llm_jni.cpp            # NativeLlm JNI 브리지 (4개 함수, ByteArray UTF-8 왕복)
 │   └── tests/                 # 호스트(g++) 단독 실행 테스트 — CMake 타깃에 미포함
 │       ├── vector_index_test.cpp # + SIMD dotProduct 스칼라 대비 검증
@@ -130,9 +132,9 @@ g++ -std=c++17 -O2 -Wall -Wextra -Werror \
   - 예: `NativeVectorIndex#nativeAdd` → `Java_com_example_rag_1library_NativeVectorIndex_nativeAdd`
   - 한 글자라도 틀리면 런타임 `UnsatisfiedLinkError`. (함수가 더 늘면 `JNI_OnLoad` + `RegisterNatives` 검토.)
 - **정적/인스턴스**: `@JvmStatic`(companion) → `(JNIEnv*, jclass)`, 인스턴스 → `(JNIEnv*, jobject)`.
-  `NativeVectorIndex` 의 9개 함수(nativeCreate/nativeCreateHnsw/nativeDestroy/nativeAdd/
-  nativeSize/nativeSearch/nativeSave/nativeLoad/nativeDim)는 전부 `@JvmStatic` + 핸들(jlong) 전달.
-  (함수가 더 늘면 `JNI_OnLoad` + `RegisterNatives` 전환 검토 — 지금이 임계점 근처.)
+  `NativeVectorIndex` 의 10개 함수(nativeCreate/nativeCreateHnsw/nativeDestroy/nativeClear/
+  nativeAdd/nativeSize/nativeSearch/nativeSave/nativeLoad/nativeDim)는 전부 `@JvmStatic` + 핸들(jlong) 전달.
+  (함수가 더 늘면 `JNI_OnLoad` + `RegisterNatives` 전환 검토 — 지금이 임계점.)
 - **라이브러리 이름 3중 일치**: `System.loadLibrary("rag-core")` ↔ `add_library(rag-core ...)` ↔ `librag-core.so`.
 - **FloatArray 전달 패턴**(rag_jni.cpp 참고): `GetPrimitiveArrayCritical` → `memcpy` → 즉시 `Release(..., JNI_ABORT)`.
   Critical 구간 안에서 JNI 호출·힙 할당·블로킹 금지. 출력은 `Set{Int,Float}ArrayRegion` 으로 out-배열에 기록.

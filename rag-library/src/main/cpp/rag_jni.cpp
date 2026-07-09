@@ -112,6 +112,16 @@ Java_com_example_rag_1library_NativeVectorIndex_nativeAdd(
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_example_rag_1library_NativeVectorIndex_nativeClear(JNIEnv* env, jclass, jlong handle) {
+    rag::VectorIndex* idx = fromHandle(handle);
+    if (idx == nullptr) {
+        throwIllegalState(env, "index handle is closed");
+        return;
+    }
+    idx->clear();
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_example_rag_1library_NativeVectorIndex_nativeSave(
         JNIEnv* env, jclass, jlong handle, jstring path) {
     rag::VectorIndex* idx = fromHandle(handle);

@@ -1,6 +1,7 @@
 package com.example.lib
 
 import android.os.Bundle
+import android.os.SystemClock
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -21,9 +22,12 @@ import java.util.concurrent.Executors
  * 온디바이스 RAG 데모 (Phase 4) — 완전 오프라인 문서 검색 + 답변 생성.
  *
  * 모델 파일이 [MODEL_DIR] 에 있으면 자동 사용한다 (없으면 무모델 폴백):
- * - model.onnx + vocab.tsv → OnnxEmbedder(e5, 시맨틱 검색)  ← 없으면 HashingEmbedder
- * - llm.gguf               → LlmEngine(답변 생성)           ← 없으면 검색 결과만 표시
+ * - model.onnx + vocab.tsv → OnnxEmbedder(e5, 시맨틱·교차언어 검색) ← 없으면 HashingEmbedder
+ *   (해싱 모드는 같은 언어 표면 매칭만 가능 — 상태줄에 안내)
+ * - llm.gguf               → LlmEngine(답변 생성)                  ← 없으면 검색 결과만 표시
  * 배치 방법은 README "모델 준비" 참고 (adb push).
+ *
+ * 저장/불러오기 버튼은 RagEngine.save/load 스냅샷(Phase 2)을 앱 내부 저장소에 시연한다.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -34,15 +38,22 @@ class MainActivity : AppCompatActivity() {
     private var rag: RagEngine? = null
     private var llm: LlmEngine? = null
     private var chat: RagChat? = null
+
+    // 아래 UI 상태는 UI 스레드에서만 접근
     private var docCounter = 0
+    private var samplesAdded = false
 
     private lateinit var statusText: TextView
     private lateinit var docInput: EditText
     private lateinit var addDocButton: Button
     private lateinit var addSamplesButton: Button
+    private lateinit var clearButton: Button
+    private lateinit var saveButton: Button
+    private lateinit var loadButton: Button
     private lateinit var chunkCountText: TextView
     private lateinit var questionInput: EditText
     private lateinit var askButton: Button
+    private lateinit var timeText: TextView
     private lateinit var answerText: TextView
     private lateinit var sourcesText: TextView
 
@@ -54,9 +65,13 @@ class MainActivity : AppCompatActivity() {
         docInput = findViewById(R.id.docInput)
         addDocButton = findViewById(R.id.addDocButton)
         addSamplesButton = findViewById(R.id.addSamplesButton)
+        clearButton = findViewById(R.id.clearButton)
+        saveButton = findViewById(R.id.saveButton)
+        loadButton = findViewById(R.id.loadButton)
         chunkCountText = findViewById(R.id.chunkCountText)
         questionInput = findViewById(R.id.questionInput)
         askButton = findViewById(R.id.askButton)
+        timeText = findViewById(R.id.timeText)
         answerText = findViewById(R.id.answerText)
         sourcesText = findViewById(R.id.sourcesText)
 
@@ -70,7 +85,13 @@ class MainActivity : AppCompatActivity() {
                 addDocuments(listOf("문서${++docCounter}" to text))
             }
         }
-        addSamplesButton.setOnClickListener { addDocuments(SAMPLE_DOCS) }
+        addSamplesButton.setOnClickListener {
+            samplesAdded = true // 중복 주입 방지 — 초기화 전까지 1회만
+            addDocuments(SAMPLE_DOCS)
+        }
+        clearButton.setOnClickListener { onClear() }
+        saveButton.setOnClickListener { onSave() }
+        loadButton.setOnClickListener { onLoad() }
         askButton.setOnClickListener { onAsk() }
     }
 
@@ -113,7 +134,9 @@ class MainActivity : AppCompatActivity() {
         llm = llmEngine
         chat = llmEngine?.let { RagChat(engine, it) }
 
-        val embedderLabel = if (onnxEmbedder != null) "e5(ONNX·시맨틱)" else "해싱(무모델)"
+        val embedderLabel =
+            if (onnxEmbedder != null) "e5(ONNX·시맨틱)"
+            else "해싱(무모델 — 같은 언어끼리 표면 매칭)"
         val llmLabel = if (llmEngine != null) "Qwen GGUF ✓" else "없음 → 검색만"
         runOnUiThread {
             statusText.text = "임베더: $embedderLabel  |  LLM: $llmLabel"
@@ -125,12 +148,80 @@ class MainActivity : AppCompatActivity() {
         setButtonsEnabled(false)
         engineExecutor.execute {
             val engine = rag ?: return@execute
+            val t0 = SystemClock.elapsedRealtime()
             docs.forEach { (id, text) -> engine.addDocument(id, text) }
+            val ms = SystemClock.elapsedRealtime() - t0
             val count = engine.chunkCount()
             runOnUiThread {
                 chunkCountText.text = "인덱싱된 청크: $count"
+                timeText.text = "인덱싱 ${ms}ms"
                 setButtonsEnabled(true)
             }
+        }
+    }
+
+    private fun onClear() {
+        setButtonsEnabled(false)
+        engineExecutor.execute {
+            rag?.clear()
+            runOnUiThread {
+                docCounter = 0
+                samplesAdded = false
+                chunkCountText.text = getString(R.string.chunk_count_zero)
+                answerText.text = ""
+                sourcesText.text = ""
+                timeText.text = ""
+                setButtonsEnabled(true)
+            }
+        }
+    }
+
+    private fun onSave() {
+        setButtonsEnabled(false)
+        engineExecutor.execute {
+            val engine = rag ?: return@execute
+            val t0 = SystemClock.elapsedRealtime()
+            val result = runCatching { engine.save(snapshotBase()) }
+            val ms = SystemClock.elapsedRealtime() - t0
+            val count = engine.chunkCount()
+            runOnUiThread {
+                timeText.text = result.fold(
+                    onSuccess = { "스냅샷 저장 ${ms}ms (청크 $count)" },
+                    onFailure = { e -> "저장 실패: ${e.message}" },
+                )
+                setButtonsEnabled(true)
+            }
+        }
+    }
+
+    private fun onLoad() {
+        setButtonsEnabled(false)
+        engineExecutor.execute {
+            val current = rag ?: return@execute
+            val activeEmbedder = embedder ?: return@execute
+            val t0 = SystemClock.elapsedRealtime()
+            val result = runCatching { RagEngine.load(snapshotBase(), activeEmbedder) }
+            result.fold(
+                onSuccess = { loaded ->
+                    current.close()
+                    rag = loaded
+                    chat = llm?.let { RagChat(loaded, it) }
+                    val ms = SystemClock.elapsedRealtime() - t0
+                    runOnUiThread {
+                        chunkCountText.text = "인덱싱된 청크: ${loaded.chunkCount()}"
+                        timeText.text = "스냅샷 복원 ${ms}ms — 재인덱싱 없음"
+                        answerText.text = ""
+                        sourcesText.text = ""
+                        setButtonsEnabled(true)
+                    }
+                },
+                onFailure = { e ->
+                    runOnUiThread {
+                        timeText.text = "복원 실패: ${e.message ?: "저장된 스냅샷 없음"}"
+                        setButtonsEnabled(true)
+                    }
+                },
+            )
         }
     }
 
@@ -144,20 +235,25 @@ class MainActivity : AppCompatActivity() {
         engineExecutor.execute {
             val engine = rag ?: return@execute
             val ragChat = chat
+            val t0 = SystemClock.elapsedRealtime()
             if (ragChat != null) {
                 // 검색 + LLM 답변 (완전한 문자 단위 스트리밍)
                 val answer = ragChat.ask(question) { piece ->
                     runOnUiThread { answerText.append(piece) }
                     true
                 }
+                val ms = SystemClock.elapsedRealtime() - t0
                 runOnUiThread {
+                    timeText.text = "검색+생성 ${ms}ms (완전 오프라인)"
                     sourcesText.text = formatSources(answer.sources)
                     setButtonsEnabled(true)
                 }
             } else {
                 // LLM 모델이 없으면 검색 결과만
                 val results = engine.search(question, topK = 3)
+                val ms = SystemClock.elapsedRealtime() - t0
                 runOnUiThread {
+                    timeText.text = "검색 ${ms}ms (완전 오프라인)"
                     answerText.text = "(LLM 모델 없음 — 검색 결과만 표시. README 모델 준비 참고)"
                     sourcesText.text = formatSources(results)
                     setButtonsEnabled(true)
@@ -174,9 +270,14 @@ class MainActivity : AppCompatActivity() {
         }.joinToString("\n\n")
     }
 
+    private fun snapshotBase(): File = File(filesDir, "rag_snapshot")
+
     private fun setButtonsEnabled(enabled: Boolean) {
         addDocButton.isEnabled = enabled
-        addSamplesButton.isEnabled = enabled
+        addSamplesButton.isEnabled = enabled && !samplesAdded
+        clearButton.isEnabled = enabled
+        saveButton.isEnabled = enabled
+        loadButton.isEnabled = enabled
         askButton.isEnabled = enabled
     }
 
