@@ -1,0 +1,3 @@
+# JitPack 빌드 환경 (AGP 9 는 JDK 21 필요)
+jdk:
+  - openjdk21

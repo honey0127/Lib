@@ -141,16 +141,22 @@ g++ -std=c++17 -O2 -Wall -Wextra -Werror \
 - **심볼 사전 검증(로컬/클라우드 공통)**: JDK 헤더로 컴파일 후 `nm` 확인 —
   `g++ -std=c++17 -I$JAVA_HOME/include -I$JAVA_HOME/include/linux -fPIC -c rag_jni.cpp && nm -g rag_jni.o | grep Java_`
 
-## 성능 (호스트 x86_64 벤치마크 — dim=384·N=20k·무작위 데이터 = 최악 조건)
+## 성능 (호스트 x86_64 벤치마크 — dim=384·무작위 데이터 = 최악 조건)
 측정 도구: `tests/bench.cpp` (파일 상단 명령으로 수동 실행 — CI 러너 타이밍은 노이즈라 미포함).
-- SIMD 내적(`dot_product.h`, arm64=NEON·x86_64=SSE2) 적용 효과:
-  브루트 검색 8.79 → **1.68 ms/질의**(5.2×), HNSW 빌드 60.4 → 16.7 s, HNSW 검색 0.48 ms/질의.
+- **dot 마이크로벤치**: 스칼라 43.2 → SIMD 10.6 ms (2천만 회, **4.1×**). `dot_product.h`
+  (arm64=NEON·x86_64=SSE2).
+- **규모 스윕**(브루트 검색 ms/질의): 1k=0.06 · 10k=0.62 · 20k=1.67 · 50k=7.06.
+  HNSW 는 20k 에서 0.43 ms(ef=100). 브루트 전체 개선 8.79 → 1.68 ms(5.2×, SIMD+k-힙).
 - 브루트포스 topK 는 k-힙 방식(후보 전체 배열 미생성, O(k) 메모리).
 - **HNSW recall 은 hnswlib(레퍼런스)와 동률** — 동일 데이터·파라미터에서 ef 100/200/400/800
   스윕 전 구간 ±0.02 이내 (mine 0.352/0.565/0.779/0.923 vs hnswlib 0.365/0.582/0.793/0.935).
   무작위 고차원은 거리 집중으로 재현율이 낮게 나오는 최악 조건이며, 구조가 있는 실제
   임베딩(e5)에선 같은 ef 에서 훨씬 높다. 기본 efSearch=128.
 - HNSW 이웃 선택은 Malkov Algorithm 4 다양성 휴리스틱(+keepPruned) 사용.
+- **JNI 경계 정직성**: 질의 복사 1.5KB ≈ 무시 가능(검색 0.4~7ms 대비), C++ add 2~16µs/벡터
+  — 인덱싱 병목은 임베딩 추론(ms/청크)이라 배치 JNI 미도입(측정 근거, README ④ 참고).
+- 배포: `maven-publish` + `jitpack.yml` — 태그 push 후 JitPack 소비 가능(README '설치').
+  제출물 준비 노트(보고서 문구·영상 대본): `docs/SUBMISSION.md`.
 
 ## 절대 커밋 금지
 - 모델 가중치: `*.onnx`, `*.gguf`, `*.task`, `*.tflite`, `/models/` — 재배포 라이선스 문제 + GitHub 100MB 제한. 앱 최초 실행 시 다운로드하는 설계.

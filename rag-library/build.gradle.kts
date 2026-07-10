@@ -5,6 +5,7 @@ plugins {
     // Kotlin 플러그인은 별도 적용하지 않는다: AGP 9+ built-in Kotlin support 가 기본 활성화
     // (android.builtInKotlin=true, 기본값)되어 있어 org.jetbrains.kotlin.android 를 함께 적용하면
     // "Cannot add extension with name 'kotlin'" 충돌이 난다. kotlin{} 블록은 그대로 사용 가능.
+    `maven-publish` // JitPack 배포용 (README '설치' 참고)
 }
 
 android {
@@ -44,6 +45,26 @@ android {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
+        }
+    }
+
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
+    }
+}
+
+// JitPack: 태그 push 후 com.github.honey0127.Lib:rag-library:<태그> 로 소비 가능
+afterEvaluate {
+    publishing {
+        publications {
+            register<MavenPublication>("release") {
+                from(components["release"])
+                groupId = "com.github.honey0127"
+                artifactId = "rag-library"
+                version = "0.9.0"
+            }
         }
     }
 }
