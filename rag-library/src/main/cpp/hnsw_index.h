@@ -26,7 +26,12 @@ public:
     int32_t dim() const override { return dim_; }
     size_t size() const override { return ids_.size(); }
     void add(int32_t id, const float* vec) override;
-    std::vector<SearchHit> topK(const float* query, int32_t k) const override;
+    using VectorIndex::topK;
+    // allowMask: 탐색은 전체 그래프에서 하되 결과 수집만 거른다(포스트 필터).
+    // 필터가 좁으면 k 미만이 반환될 수 있다 — 좁은 필터는 BruteForceIndex 권장.
+    std::vector<SearchHit> topK(const float* query, int32_t k, const uint8_t* allowMask,
+                                int32_t maskLen) const override;
+    // 그래프 노드 삭제는 미지원(연결성 훼손 — 알려진 난제). supportsRemove()==false.
     void clear() override;
 
     uint32_t formatKind() const override { return kFormatKind; }

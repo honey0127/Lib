@@ -224,7 +224,8 @@ void HnswIndex::add(int32_t id, const float* vec) {
     }
 }
 
-std::vector<SearchHit> HnswIndex::topK(const float* query, int32_t k) const {
+std::vector<SearchHit> HnswIndex::topK(const float* query, int32_t k, const uint8_t* allowMask,
+                                       int32_t maskLen) const {
     const int32_t n = static_cast<int32_t>(ids_.size());
     if (k <= 0 || n == 0) {
         return {};
@@ -240,12 +241,17 @@ std::vector<SearchHit> HnswIndex::topK(const float* query, int32_t k) const {
     const int32_t ef = std::max(efSearch_, k);
     const std::vector<Cand> cands = searchLayer(q.data(), cur, 0, ef);
 
-    const int32_t kk = std::min(k, static_cast<int32_t>(cands.size()));
     std::vector<SearchHit> hits;
-    hits.reserve(static_cast<size_t>(kk));
-    for (int32_t i = 0; i < kk; ++i) {
-        const Cand& c = cands[static_cast<size_t>(i)];
-        hits.push_back({ids_[static_cast<size_t>(c.node)], 1.0f - c.dist});
+    hits.reserve(static_cast<size_t>(std::min(k, static_cast<int32_t>(cands.size()))));
+    for (const Cand& c : cands) {  // dist 오름차순 — 마스크 통과분만 k 개까지
+        if (static_cast<int32_t>(hits.size()) >= k) {
+            break;
+        }
+        const int32_t id = ids_[static_cast<size_t>(c.node)];
+        if (allowMask != nullptr && (id < 0 || id >= maskLen || allowMask[id] == 0)) {
+            continue;
+        }
+        hits.push_back({id, 1.0f - c.dist});
     }
     return hits;
 }

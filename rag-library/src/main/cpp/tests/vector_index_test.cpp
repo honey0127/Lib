@@ -99,6 +99,45 @@ int main() {
         expect(idx.topK(e0, 3).empty(), "clear -> empty topK");
     }
 
+    // 5.1) allowMask 필터: 스캔 루프 내 정확 필터링
+    {
+        VectorIndex idx(2);
+        float a[2] = {1.0f, 0.0f};   // id 0 — 질의와 동일
+        float b[2] = {0.9f, 0.1f};   // id 1 — 근접
+        float c[2] = {0.0f, 1.0f};   // id 2 — 직교
+        idx.add(0, a);
+        idx.add(1, b);
+        idx.add(2, c);
+        const uint8_t mask[3] = {0, 1, 1};  // id 0 제외
+        auto hits = idx.topK(a, 3, mask, 3);
+        expect(hits.size() == 2, "filter excludes masked-out id");
+        expect(hits[0].id == 1 && hits[1].id == 2, "filtered order correct");
+        const uint8_t none[3] = {0, 0, 0};
+        expect(idx.topK(a, 3, none, 3).empty(), "all-masked -> empty");
+        // 마스크 범위 밖 id 는 제외 취급
+        expect(idx.topK(a, 3, mask, 1).empty(), "ids >= maskLen excluded");
+    }
+
+    // 5.2) removeByIds: swap-remove 후 검색/추가 정상
+    {
+        VectorIndex idx(2);
+        float a[2] = {1.0f, 0.0f};
+        float b[2] = {0.0f, 1.0f};
+        float c[2] = {-1.0f, 0.0f};
+        idx.add(10, a);
+        idx.add(11, b);
+        idx.add(12, c);
+        expect(idx.supportsRemove(), "brute supports remove");
+        const int32_t rm[2] = {11, 99};  // 99 는 없음
+        expect(idx.removeByIds(rm, 2) == 1, "remove returns actual count");
+        expect(idx.size() == 2, "size after remove");
+        auto hits = idx.topK(a, 3);
+        expect(hits.size() == 2 && hits[0].id == 10 && hits[1].id == 12,
+               "removed id absent, others intact");
+        idx.add(13, b);  // 삭제 후 재추가
+        expect(idx.topK(b, 1).front().id == 13, "add after remove works");
+    }
+
     // 5.5) SIMD dotProduct == 스칼라 참조 (홀수 길이 꼬리 포함, 허용 오차 내)
     {
         std::mt19937 gen(42);

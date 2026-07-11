@@ -43,6 +43,49 @@ class RagEngineTest {
     }
 
     @Test
+    fun search_withAllowDocIds_filtersExactly() {
+        RagEngine().use { rag ->
+            rag.addDocument("food", "김치는 발효 음식이다.")
+            rag.addDocument("space", "화성은 태양계의 행성이다.")
+
+            val all = rag.search("김치", topK = 5)
+            assertTrue(all.isNotEmpty())
+
+            val onlySpace = rag.search("김치", topK = 5, allowDocIds = setOf("space"))
+            assertTrue(onlySpace.isNotEmpty())
+            assertTrue(onlySpace.all { it.chunk.docId == "space" })
+
+            assertTrue(rag.search("김치", topK = 5, allowDocIds = emptySet()).isEmpty())
+        }
+    }
+
+    @Test
+    fun removeDocument_excludesFromSearch_andReturnsCount() {
+        RagEngine().use { rag ->
+            rag.addDocument("food", "김치는 발효 음식이다.")
+            rag.addDocument("space", "화성은 태양계의 행성이다.")
+
+            assertTrue(rag.removeDocument("food") > 0)
+            assertEquals(0, rag.removeDocument("food")) // 이미 없음
+
+            assertTrue(rag.search("김치", topK = 5).all { it.chunk.docId != "food" })
+            assertEquals(1, rag.chunkCount())
+
+            // 삭제 후 추가/검색 정상
+            rag.addDocument("food2", "김치찌개는 김치로 끓인다.")
+            assertEquals("food2", rag.search("김치", topK = 1).single().chunk.docId)
+        }
+    }
+
+    @Test(expected = UnsupportedOperationException::class)
+    fun removeDocument_onHnsw_throws() {
+        RagEngine(indexKind = IndexKind.HNSW).use { rag ->
+            rag.addDocument("d", "문서 하나.")
+            rag.removeDocument("d")
+        }
+    }
+
+    @Test
     fun clear_emptiesIndex_andAllowsReuse() {
         RagEngine().use { rag ->
             rag.addDocument("food", "김치는 발효 음식이다.")

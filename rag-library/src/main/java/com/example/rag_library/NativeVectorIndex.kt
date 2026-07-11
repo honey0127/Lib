@@ -26,14 +26,35 @@ internal class NativeVectorIndex private constructor(
         nativeAdd(checkOpen(), id, vector)
     }
 
-    /** 코사인 유사도 상위 k개를 점수 내림차순으로 반환한다(인덱스가 k보다 작으면 그만큼만). */
-    fun search(query: FloatArray, k: Int): List<Hit> {
+    /**
+     * 코사인 유사도 상위 k개를 점수 내림차순으로 반환한다(인덱스가 k보다 작으면 그만큼만).
+     *
+     * [allowMask]는 id 로 인덱싱되는 허용 마스크(0=제외, null=전체 허용) — 배열 1회 전달로
+     * 네이티브 스캔 루프 안에서 걸러진다(후보별 업콜 없음). 브루트포스는 정확 필터,
+     * HNSW 는 포스트 필터(좁은 필터에서 k 미만 반환 가능).
+     */
+    fun search(query: FloatArray, k: Int, allowMask: ByteArray? = null): List<Hit> {
         require(query.size == dim) { "query.size(${query.size}) != dim($dim)" }
         require(k > 0) { "k must be > 0" }
         val ids = IntArray(k)
         val scores = FloatArray(k)
-        val n = nativeSearch(checkOpen(), query, k, ids, scores)
+        val n = nativeSearch(checkOpen(), query, k, allowMask, ids, scores)
         return List(n) { Hit(ids[it], scores[it]) }
+    }
+
+    /**
+     * id 목록의 벡터를 삭제하고 실제 삭제 개수를 반환한다(브루트포스 전용, swap-remove).
+     * @throws UnsupportedOperationException HNSW 백엔드 (그래프 노드 삭제는 미지원 — clear 후 재구축)
+     */
+    fun remove(removeIds: IntArray): Int {
+        if (removeIds.isEmpty()) return 0
+        val n = nativeRemove(checkOpen(), removeIds)
+        if (n < 0) {
+            throw UnsupportedOperationException(
+                "HNSW 인덱스는 삭제를 지원하지 않는다 — IndexKind.BRUTE_FORCE 를 쓰거나 clear 후 재구축할 것",
+            )
+        }
+        return n
     }
 
     fun size(): Int = nativeSize(checkOpen())
@@ -117,8 +138,10 @@ internal class NativeVectorIndex private constructor(
             handle: Long,
             query: FloatArray,
             k: Int,
+            allowMask: ByteArray?,
             outIds: IntArray,
             outScores: FloatArray,
         ): Int
+        @JvmStatic private external fun nativeRemove(handle: Long, removeIds: IntArray): Int
     }
 }

@@ -117,6 +117,22 @@ int main() {
         expect(recall >= 0.90, "recall@10 >= 0.90");
     }
 
+    // 4.5) allowMask 포스트 필터: 허용된 id 만 반환
+    {
+        rag::HnswIndex idx(3);
+        float a[3] = {1.0f, 0.0f, 0.0f};
+        float b[3] = {0.9f, 0.1f, 0.0f};
+        float c[3] = {0.0f, 1.0f, 0.0f};
+        idx.add(0, a);
+        idx.add(1, b);
+        idx.add(2, c);
+        const uint8_t mask[3] = {0, 1, 1};
+        auto hits = idx.topK(a, 3, mask, 3);
+        expect(hits.size() == 2 && hits[0].id == 1 && hits[1].id == 2,
+               "hnsw filter returns only allowed ids");
+        expect(!idx.supportsRemove(), "hnsw does not support remove");
+    }
+
     // 5) 영벡터 add/query — NaN 없이 동작
     {
         rag::HnswIndex idx(2);

@@ -7,20 +7,30 @@ import java.io.File
 
 /** [RagEngine] 이 사용할 벡터 인덱스 백엔드. */
 enum class IndexKind {
-    /** 정확한 브루트포스 — 수천 청크까지 충분히 빠르고 결과가 항상 정확하다(기본). */
+    /**
+     * 정확한 브루트포스 — 수천 청크까지 충분히 빠르고 결과가 항상 정확하다(기본).
+     * 모바일 개인 문서 규모에선 이것이 옳은 선택이다: [RagEngine.search]의 docId 필터가
+     * 정확도 손실 0으로 동작하고, [RagEngine.removeDocument](swap-remove)도 무손실 공짜다
+     * — 필터드 서치/삭제가 알려진 난제인 ANN 계열과의 결정적 차이.
+     */
     BRUTE_FORCE,
 
-    /** HNSW 근사 최근접 이웃 — 수만 청크 이상 대규모 코퍼스용(재현율 ≈ 1, 훨씬 빠름). */
+    /**
+     * HNSW 근사 최근접 이웃 — 수만 청크 이상 대규모 코퍼스용(재현율 ≈ 1, 훨씬 빠름).
+     * 제약: 삭제 미지원, docId 필터는 포스트 필터(좁은 필터에서 k 미만 반환 가능).
+     */
     HNSW,
 }
 
 /**
- * 온디바이스 RAG 파사드 — 문서 추가와 유사도 검색.
+ * 온디바이스 RAG 파사드 — 문서 추가/삭제와 유사도 검색.
  *
  * ```
  * RagEngine().use { rag ->
  *     rag.addDocument("guide", "김치는 발효 음식이다. 배추와 고춧가루로 만든다.")
  *     val top = rag.search("발효 음식", topK = 3)
+ *     rag.search("발효", topK = 3, allowDocIds = setOf("guide"))  // 문서 필터
+ *     rag.removeDocument("guide")                                  // 삭제 (BRUTE_FORCE)
  * }
  * ```
  *
@@ -38,7 +48,7 @@ class RagEngine private constructor(
     private val embedder: Embedder,
     private val chunker: TextChunker,
     private val index: NativeVectorIndex,
-    private val chunks: ArrayList<Chunk>,
+    private val chunks: LinkedHashMap<Int, Chunk>, // id → 청크 (삭제 후 id 는 불연속일 수 있음)
 ) : Closeable {
 
     constructor(
@@ -52,10 +62,11 @@ class RagEngine private constructor(
             IndexKind.BRUTE_FORCE -> NativeVectorIndex.bruteForce(embedder.dim)
             IndexKind.HNSW -> NativeVectorIndex.hnsw(embedder.dim)
         },
-        chunks = ArrayList(),
+        chunks = LinkedHashMap(),
     )
 
     private var closed = false
+    private var nextId = (chunks.keys.maxOrNull() ?: -1) + 1
 
     /** [text]를 청크로 분할·임베딩해 인덱스에 추가하고, 추가된 청크 수를 반환한다. */
     @Synchronized
@@ -63,20 +74,50 @@ class RagEngine private constructor(
         checkOpen()
         val newChunks = chunker.chunk(docId, text)
         for (c in newChunks) {
-            index.add(chunks.size, embedder.embed(c.text))
-            chunks.add(c)
+            val id = nextId++
+            index.add(id, embedder.embed(c.text))
+            chunks[id] = c
         }
         return newChunks.size
     }
 
-    /** [query]와 가장 유사한 청크 [topK]개를 유사도 내림차순으로 반환한다. */
+    /**
+     * [query]와 가장 유사한 청크 [topK]개를 유사도 내림차순으로 반환한다.
+     *
+     * [allowDocIds]가 주어지면 해당 문서의 청크만 검색한다 — 허용 마스크가 배열 1회로
+     * 네이티브에 전달되어 C++ 스캔 루프 안에서 걸러진다(청크별 콜백 없음).
+     * BRUTE_FORCE 에선 정확 필터, HNSW 에선 포스트 필터([IndexKind] 참고).
+     */
     @Synchronized
-    fun search(query: String, topK: Int = 5): List<SearchResult> {
+    fun search(query: String, topK: Int = 5, allowDocIds: Set<String>? = null): List<SearchResult> {
         checkOpen()
         require(topK > 0) { "topK must be > 0" }
         if (chunks.isEmpty() || query.isBlank()) return emptyList()
-        return index.search(embedder.embedQuery(query), topK)
-            .map { SearchResult(chunks[it.id], it.score) }
+
+        val mask: ByteArray? = allowDocIds?.let { allowed ->
+            val m = ByteArray(nextId)
+            for ((id, chunk) in chunks) {
+                if (chunk.docId in allowed) m[id] = 1
+            }
+            m
+        }
+        return index.search(embedder.embedQuery(query), topK, mask)
+            .map { SearchResult(chunks.getValue(it.id), it.score) }
+    }
+
+    /**
+     * [docId]의 모든 청크를 삭제하고 삭제된 청크 수를 반환한다(없으면 0).
+     * @throws UnsupportedOperationException HNSW 백엔드 — 삭제는 BRUTE_FORCE 전용
+     *   (그래프 노드 삭제는 알려진 난제. HNSW 는 [clear] 후 재구축할 것)
+     */
+    @Synchronized
+    fun removeDocument(docId: String): Int {
+        checkOpen()
+        val ids = chunks.filterValues { it.docId == docId }.keys
+        if (ids.isEmpty()) return 0
+        val removed = index.remove(ids.toIntArray()) // HNSW 면 여기서 예외 (chunks 는 그대로)
+        ids.forEach { chunks.remove(it) }
+        return removed
     }
 
     /** 지금까지 인덱싱된 청크 수. */
@@ -89,6 +130,7 @@ class RagEngine private constructor(
         checkOpen()
         index.clear()
         chunks.clear()
+        nextId = 0
     }
 
     /**
@@ -142,7 +184,7 @@ class RagEngine private constructor(
                 index.close()
                 throw t
             }
-            return RagEngine(embedder, chunker, index, ArrayList(chunks))
+            return RagEngine(embedder, chunker, index, chunks)
         }
 
         private fun indexFileOf(base: File) = File(base.parentFile, base.name + ".idx")

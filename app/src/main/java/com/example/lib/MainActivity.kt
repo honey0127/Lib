@@ -237,8 +237,13 @@ class MainActivity : AppCompatActivity() {
             val ragChat = chat
             val t0 = SystemClock.elapsedRealtime()
             if (ragChat != null) {
-                // 검색 + LLM 답변 (완전한 문자 단위 스트리밍)
-                val answer = ragChat.ask(question) { piece ->
+                // 근거(출처)를 토큰 생성 전에 먼저 표시 → 생성이 느려도 체감 대기 제거
+                val answer = ragChat.ask(
+                    question,
+                    onSources = { sources ->
+                        runOnUiThread { sourcesText.text = formatSources(sources) }
+                    },
+                ) { piece ->
                     runOnUiThread { answerText.append(piece) }
                     true
                 }
@@ -266,7 +271,10 @@ class MainActivity : AppCompatActivity() {
         if (sources.isEmpty()) return "(검색 결과 없음 — 먼저 문서를 넣어주세요)"
         return sources.mapIndexed { i, r ->
             val preview = r.chunk.text.replace('\n', ' ').take(80)
-            String.format(Locale.KOREA, "%d. [%s] 유사도 %.3f\n%s", i + 1, r.chunk.docId, r.score, preview)
+            String.format(
+                Locale.KOREA, "%d. 출처: %s §%d — 유사도 %.3f\n%s",
+                i + 1, r.chunk.docId, r.chunk.index + 1, r.score, preview,
+            )
         }.joinToString("\n\n")
     }
 

@@ -35,7 +35,28 @@ public:
 
     // query 와의 코사인 유사도 상위 k개를 점수 내림차순으로 반환.
     // k 가 size() 보다 크면 size() 개, k <= 0 이면 빈 결과.
-    virtual std::vector<SearchHit> topK(const float* query, int32_t k) const = 0;
+    //
+    // allowMask: id 로 인덱싱되는 허용 마스크(0=제외). nullptr 이면 전체 허용.
+    // id >= maskLen 인 벡터는 제외로 취급한다. 마스크는 JNI 경계를 배열 1회로
+    // 건너오므로 후보별 콜백 업콜이 없다.
+    // - BruteForceIndex: 스캔 루프 안에서 걸러 정확도 손실 0 (필터드 서치에 권장)
+    // - HnswIndex: 그래프 탐색은 그대로 두고 결과 수집만 거른다 — 필터가 좁을수록
+    //   결과가 k 미만이 될 수 있다(필터드 ANN 은 알려진 난제. 좁은 필터는 브루트포스 사용)
+    virtual std::vector<SearchHit> topK(const float* query, int32_t k, const uint8_t* allowMask,
+                                        int32_t maskLen) const = 0;
+
+    std::vector<SearchHit> topK(const float* query, int32_t k) const {
+        return topK(query, k, nullptr, 0);
+    }
+
+    // id 목록으로 벡터 삭제. 지원하지 않는 백엔드(HNSW)는 supportsRemove()==false 이고
+    // removeByIds 가 0을 반환한다. 반환값: 실제 삭제된 개수.
+    virtual bool supportsRemove() const { return false; }
+    virtual size_t removeByIds(const int32_t* removeIds, size_t count) {
+        (void)removeIds;
+        (void)count;
+        return 0;
+    }
 
     virtual void clear() = 0;
 
@@ -55,7 +76,12 @@ public:
     int32_t dim() const override { return dim_; }
     size_t size() const override { return ids_.size(); }
     void add(int32_t id, const float* vec) override;
-    std::vector<SearchHit> topK(const float* query, int32_t k) const override;
+    using VectorIndex::topK;
+    std::vector<SearchHit> topK(const float* query, int32_t k, const uint8_t* allowMask,
+                                int32_t maskLen) const override;
+    // 연속 메모리풀 swap-remove — O(삭제수 × dim). 정확도 영향 0 (브루트포스의 강점).
+    bool supportsRemove() const override { return true; }
+    size_t removeByIds(const int32_t* removeIds, size_t count) override;
     void clear() override;
 
     uint32_t formatKind() const override { return kFormatKind; }

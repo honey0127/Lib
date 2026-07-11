@@ -132,9 +132,12 @@ g++ -std=c++17 -O2 -Wall -Wextra -Werror \
   - 예: `NativeVectorIndex#nativeAdd` → `Java_com_example_rag_1library_NativeVectorIndex_nativeAdd`
   - 한 글자라도 틀리면 런타임 `UnsatisfiedLinkError`. (함수가 더 늘면 `JNI_OnLoad` + `RegisterNatives` 검토.)
 - **정적/인스턴스**: `@JvmStatic`(companion) → `(JNIEnv*, jclass)`, 인스턴스 → `(JNIEnv*, jobject)`.
-  `NativeVectorIndex` 의 10개 함수(nativeCreate/nativeCreateHnsw/nativeDestroy/nativeClear/
-  nativeAdd/nativeSize/nativeSearch/nativeSave/nativeLoad/nativeDim)는 전부 `@JvmStatic` + 핸들(jlong) 전달.
+  `NativeVectorIndex` 의 11개 함수(nativeCreate/nativeCreateHnsw/nativeDestroy/nativeClear/
+  nativeAdd/nativeRemove/nativeSize/nativeSearch(allowMask 포함)/nativeSave/nativeLoad/nativeDim)는
+  전부 `@JvmStatic` + 핸들(jlong) 전달.
   (함수가 더 늘면 `JNI_OnLoad` + `RegisterNatives` 전환 검토 — 지금이 임계점.)
+- **필터 전달 규약**: docId 필터는 id 인덱스 ByteArray 마스크로 1회 전달 — 후보별 자바
+  콜백 업콜 금지(µs 업콜이 청크 수만큼 터진다). C++ 스캔 루프 내부에서 검사한다.
 - **라이브러리 이름 3중 일치**: `System.loadLibrary("rag-core")` ↔ `add_library(rag-core ...)` ↔ `librag-core.so`.
 - **FloatArray 전달 패턴**(rag_jni.cpp 참고): `GetPrimitiveArrayCritical` → `memcpy` → 즉시 `Release(..., JNI_ABORT)`.
   Critical 구간 안에서 JNI 호출·힙 할당·블로킹 금지. 출력은 `Set{Int,Float}ArrayRegion` 으로 out-배열에 기록.
@@ -181,6 +184,13 @@ g++ -std=c++17 -O2 -Wall -Wextra -Werror \
   `./gradlew :app:installDebug` 로 설치. CI build 잡이 `:app:assembleDebug` 컴파일 검증.
   — 남은 것: 실기기에서 화면 확인 + 시연영상 촬영.
 - ~~라이선스 정비~~ ✅ 완료: `LICENSE`(Apache-2.0) + `NOTICE` + `THIRD_PARTY_LICENSES.md` + `README.md`.
+- **검색 CRUD ✅**: search(allowDocIds 필터) / removeDocument(브루트포스 swap-remove) /
+  clear. RagChat.ask 는 onSources 를 토큰보다 먼저 콜백(체감 대기 제거).
+- **결선 카드(제출 후, 데모 안정이 전제)**: ① SQ8 int8 스칼라 양자화 — 메모리 4배↓
+  (5만 청크 75→19MB), NEON vmull_s8(+가능하면 SDOT 런타임 분기), recall 곡선 벤치 헤드라인.
+  ② 구조 인지 청킹(마크다운/한국어 종결어미) ③ BM25(문자 bigram 자체 구현)+RRF 하이브리드.
+  제외 확정: 크로스인코더 리랭커(메모리 예산 초과), QNN/Hexagon(독점 SDK — Apache-2.0 부적합),
+  NNAPI(deprecated), Vulkan 오프로드(기기 편차 — 멘토링 단계 소재).
 
 ## 대회 일정 (2026, 핵심 마감)
 - 참가접수: ~**7.17(금) 18:00**, oss.kr 온라인 접수. (최우선)

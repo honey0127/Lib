@@ -111,6 +111,30 @@ Java_com_example_rag_1library_NativeVectorIndex_nativeAdd(
     idx->add(id, tmp.data());
 }
 
+// 반환: 삭제된 개수. 백엔드가 삭제 미지원(HNSW)이면 -1.
+extern "C" JNIEXPORT jint JNICALL
+Java_com_example_rag_1library_NativeVectorIndex_nativeRemove(
+        JNIEnv* env, jclass, jlong handle, jintArray removeIds) {
+    rag::VectorIndex* idx = fromHandle(handle);
+    if (idx == nullptr) {
+        throwIllegalState(env, "index handle is closed");
+        return 0;
+    }
+    if (!idx->supportsRemove()) {
+        return -1;
+    }
+    const jsize count = env->GetArrayLength(removeIds);
+    if (count == 0) {
+        return 0;
+    }
+    std::vector<int32_t> ids(static_cast<size_t>(count));
+    env->GetIntArrayRegion(removeIds, 0, count, ids.data());
+    if (env->ExceptionCheck()) {
+        return 0;
+    }
+    return static_cast<jint>(idx->removeByIds(ids.data(), ids.size()));
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_example_rag_1library_NativeVectorIndex_nativeClear(JNIEnv* env, jclass, jlong handle) {
     rag::VectorIndex* idx = fromHandle(handle);
@@ -175,7 +199,7 @@ Java_com_example_rag_1library_NativeVectorIndex_nativeSize(JNIEnv* env, jclass, 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_example_rag_1library_NativeVectorIndex_nativeSearch(
         JNIEnv* env, jclass, jlong handle, jfloatArray query, jint k,
-        jintArray outIds, jfloatArray outScores) {
+        jbyteArray allowMask, jintArray outIds, jfloatArray outScores) {
     rag::VectorIndex* idx = fromHandle(handle);
     if (idx == nullptr) {
         throwIllegalState(env, "index handle is closed");
@@ -199,7 +223,24 @@ Java_com_example_rag_1library_NativeVectorIndex_nativeSearch(
         return 0;
     }
 
-    const std::vector<rag::SearchHit> hits = idx->topK(q.data(), k);
+    // 허용 마스크(id 인덱스, 0=제외)는 배열 1회 복사 — 후보별 자바 업콜 없음
+    std::vector<uint8_t> mask;
+    if (allowMask != nullptr) {
+        const jsize maskLen = env->GetArrayLength(allowMask);
+        mask.resize(static_cast<size_t>(maskLen));
+        if (maskLen > 0) {
+            env->GetByteArrayRegion(allowMask, 0, maskLen,
+                                    reinterpret_cast<jbyte*>(mask.data()));
+            if (env->ExceptionCheck()) {
+                return 0;
+            }
+        }
+    }
+
+    const std::vector<rag::SearchHit> hits =
+            (allowMask != nullptr)
+                    ? idx->topK(q.data(), k, mask.data(), static_cast<int32_t>(mask.size()))
+                    : idx->topK(q.data(), k);
     const jint n = static_cast<jint>(hits.size());
     if (n == 0) {
         return 0;
